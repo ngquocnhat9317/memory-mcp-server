@@ -1,0 +1,28 @@
+{
+  "name": "memory-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for persisting agent long-term memory and step-by-step reasoning traces in SQLite",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "memory-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/index.js','755')\"",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
