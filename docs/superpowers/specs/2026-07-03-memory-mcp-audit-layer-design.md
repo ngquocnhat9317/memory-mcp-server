@@ -96,8 +96,14 @@ Supported `mark_type` values in v1:
 
 Expected behavior:
 - one step may have multiple marks
-- marks are additive
+- marks are additive across different `mark_type` values
 - adding marks does not alter the original step text
+- repeated writes for the same `(step_id, mark_type)` are idempotent:
+  - if `note` is omitted, the write is a no-op when that mark already exists
+  - if `note` is provided, the existing mark's note is updated instead of inserting a duplicate
+
+Constraint for v1:
+- enforce one row per `(step_id, mark_type)` so audit reads stay stable and `reasoning_list_milestones` does not return accidental duplicates
 
 #### `reasoning_list_milestones`
 
@@ -149,7 +155,14 @@ Expected output:
 - fallback outline if no marks exist
 
 Fallback behavior:
-- if the session has no marks, return a lightweight outline using session metadata, conclusion, and representative steps rather than failing
+- if the session has no marks, return a deterministic lightweight outline rather than failing
+- the fallback outline should include:
+  - session metadata
+  - conclusion if present
+  - first step
+  - last step if different from the first
+  - at most one middle step when the session has 3 or more steps
+- the fallback selection must be deterministic so test coverage and client behavior stay stable
 
 ## Data Model
 
@@ -177,6 +190,7 @@ Suggested columns:
 
 Suggested constraints:
 - `mark_type` checked against the supported set
+- `UNIQUE(step_id, mark_type)` to enforce idempotent marking behavior
 
 Suggested indexes:
 - index on `step_id`
@@ -214,8 +228,14 @@ Search target:
 - `observation`
 
 Recommended first version:
-- SQLite text search compatible with the current stack
+- use SQLite FTS5, matching the existing memory-search approach already present in the codebase
+- add a dedicated `reasoning_steps_fts` index rather than using `LIKE` scans
 - no semantic search
+
+Reasoning:
+- the current database already uses FTS5 successfully for memories
+- a plain `LIKE` scan would work for tiny datasets but becomes the wrong default for an audit-focused trace store
+- using FTS in v1 avoids shipping a search tool whose performance model immediately conflicts with the product goal
 
 ### `reasoning_get_session_outline`
 
@@ -226,6 +246,11 @@ Outline generation should:
 - fall back cleanly for sessions without markers
 
 No summary cache is needed in the first iteration.
+
+Deterministic fallback contract:
+- if marked steps exist, the outline uses marked steps ordered by `created_at`, then `step_number`
+- if no marked steps exist, the outline uses the fallback step selection defined in the tool surface section
+- output ordering must be deterministic for stable tests and predictable client rendering
 
 ## Migration Strategy
 
@@ -254,6 +279,7 @@ Suggested layout:
 - `src/migrations/`
   - `0001_initial.ts`
   - `0002_reasoning_step_marks.ts`
+  - `0003_reasoning_steps_fts.ts`
   - future migrations follow the same pattern
 
 Each migration file should:
@@ -304,12 +330,25 @@ Important detail:
 - no existing rows need backfill
 - older sessions simply have zero marks until agents start using them
 
+#### `0003_reasoning_steps_fts`
+
+Responsibility:
+- create an FTS5 index over reasoning-step text for `reasoning_search_steps`
+- create the triggers needed to keep the index in sync on insert, update, and delete
+- backfill the FTS index from existing `reasoning_steps` rows during migration
+
+Important detail:
+- this migration is required for upgrade-safe search on old databases
+- without backfill, upgraded databases would search only newly-written steps, which is not acceptable for an audit tool
+- backfill must run inside the migration so existing traces become searchable immediately after upgrade
+
 ### Compatibility Rules
 
 - never rename or repurpose existing columns silently
 - avoid destructive migrations unless absolutely necessary
 - prefer additive migrations
 - if a migration needs data backfill in the future, it must be resumable or fully transactional
+- any new derived index or FTS table must either be backfilled during migration or explicitly documented as partial; audit search is not allowed to silently become partial
 
 ### Failure Handling
 
@@ -320,6 +359,7 @@ If migration fails:
 SQLite guidance:
 - wrap each migration in a transaction when possible
 - keep each migration focused and small
+- when using FTS external-content tables, include explicit rebuild/backfill steps for pre-existing rows
 
 ### Rollback Position
 
@@ -341,6 +381,7 @@ This matches the practical goal: new package versions should not damage existing
 
 2. Upgrade path
    - starting from a database with only the initial schema upgrades cleanly to the new version
+   - pre-existing reasoning steps become searchable after upgrade, not only newly-added ones
 
 3. Compatibility
    - existing reasoning tools still work on upgraded databases
@@ -356,6 +397,7 @@ This matches the practical goal: new package versions should not damage existing
 
 5. Fallback behavior
    - `reasoning_get_session_outline` works for sessions with no marks
+   - the fallback outline returns the same ordered steps for the same input every time
 
 ### Manual Smoke Expectations
 
@@ -381,6 +423,7 @@ At minimum, a release candidate should verify:
 
 ### Phase 3: Audit Retrieval
 
+- add `0003_reasoning_steps_fts`
 - add `reasoning_search_steps`
 - add `reasoning_get_session_outline`
 

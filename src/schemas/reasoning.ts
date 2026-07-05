@@ -70,6 +70,87 @@ export type ReasoningListSessionsInput = z.infer<
   typeof ReasoningListSessionsInputSchema
 >;
 
+export const ReasoningMarkTypeEnum = z.enum([
+  "milestone",
+  "decision",
+  "conflict",
+  "important",
+  "hypothesis",
+]);
+export type ReasoningMarkType = z.infer<typeof ReasoningMarkTypeEnum>;
+
+export const ReasoningMarkStepInputSchema = z
+  .object({
+    step_id: z.string().min(1).describe("The reasoning step id to mark."),
+    mark_type: ReasoningMarkTypeEnum.describe(
+      "Audit marker type for the step."
+    ),
+    note: z
+      .string()
+      .max(1000)
+      .optional()
+      .describe("Optional note attached to the mark."),
+  })
+  .strict();
+export type ReasoningMarkStepInput = z.infer<
+  typeof ReasoningMarkStepInputSchema
+>;
+
+export const ReasoningSearchStepsInputSchema = z
+  .object({
+    query: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe("Full-text query across thought, action, and observation."),
+    session_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional session id filter."),
+    agent_id: z.string().max(100).optional().describe("Optional agent_id filter."),
+    mark_type: ReasoningMarkTypeEnum.optional().describe(
+      "Optional mark filter."
+    ),
+    limit: z.number().int().min(1).max(200).default(20),
+    offset: z.number().int().min(0).default(0),
+  })
+  .strict();
+export type ReasoningSearchStepsInput = z.infer<
+  typeof ReasoningSearchStepsInputSchema
+>;
+
+export const ReasoningListMilestonesInputSchema = z
+  .object({
+    session_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional session id filter."),
+    agent_id: z.string().max(100).optional().describe("Optional agent_id filter."),
+    mark_type: ReasoningMarkTypeEnum.optional().describe(
+      "Optional mark filter."
+    ),
+    limit: z.number().int().min(1).max(200).default(20),
+    offset: z.number().int().min(0).default(0),
+  })
+  .strict();
+export type ReasoningListMilestonesInput = z.infer<
+  typeof ReasoningListMilestonesInputSchema
+>;
+
+export const ReasoningGetSessionOutlineInputSchema = z
+  .object({
+    session_id: z
+      .string()
+      .min(1)
+      .describe("The session id to summarize into an audit outline."),
+  })
+  .strict();
+export type ReasoningGetSessionOutlineInput = z.infer<
+  typeof ReasoningGetSessionOutlineInputSchema
+>;
+
 export const ReasoningCompleteSessionInputSchema = z
   .object({
     session_id: z.string().min(1).describe("The session id to complete."),
