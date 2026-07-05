@@ -1,326 +1,259 @@
 # AGENTS.md
 
-## Core Rules
+This file tells an agent how to use this MCP correctly based on the code that exists now.
 
-- This MCP has two tool families only: `memory_*` and `reasoning_*`.
-- Use a `reasoning-first` workflow for any non-trivial task.
-- Do not open a reasoning session for a trivial one-step lookup.
-- Do not store a full chain of thought in memory.
-- Do not store secrets, credentials, tokens, passwords, or raw sensitive personal data.
-- If this file conflicts with actual tool behavior, trust `src/tools/memory.ts`, `src/tools/reasoning.ts`, and their schemas first.
+If this file and the implementation disagree, trust these files first:
 
-## Strict Decision Tree
+- `src/tools/memory.ts`
+- `src/tools/reasoning.ts`
+- `src/schemas/memory.ts`
+- `src/schemas/reasoning.ts`
 
-Follow this flow in order.
+## Core Model
 
-### 1. Classify the task
+This MCP has two tool families:
 
-- If the task is a trivial lookup with no meaningful branching, do not call `reasoning_*`.
-- If the task is a single-step factual task, use `memory_*` only if prior stored context would help.
-- If the task is non-trivial, multi-step, uncertain, investigative, or decision-heavy, start with `reasoning_start_session`.
+- `memory_*` for durable recall
+- `reasoning_*` for per-task trace capture and audit retrieval
 
-### 2. Start reasoning early for non-trivial work
+Do not treat them as interchangeable.
 
-Call `reasoning_start_session` before the main investigation begins when any of these are true:
+## Fast Decision Rule
 
-- the task may take multiple steps
-- the task has uncertainty or competing hypotheses
-- the task includes debugging, planning, investigation, or trade-offs
-- the task may need an auditable trace later
+Use this order:
 
-Do not delay session creation until after important decisions have already happened.
+1. Trivial one-step lookup:
+   - do not open a reasoning session
+   - use no MCP tool unless memory recall is actually needed
+2. Single-step factual task where prior context may matter:
+   - prefer `memory_search` for a real keyword
+   - use `memory_list` only when browsing is better than searching
+3. Non-trivial task with multiple steps, uncertainty, debugging, planning, or trade-offs:
+   - start with `reasoning_start_session`
+   - then pull memory only if it changes the outcome
 
-### 3. Pull memory into the reasoning session only when needed
+## Reasoning Workflow
 
-Once a reasoning session exists, decide which read tool to call:
+For non-trivial tasks:
 
-- Use `memory_search` when you have a topic, keyword, or concrete hypothesis.
-- Use `memory_list` when you need to browse by `type`, `agent_id`, `tags`, `importance`, or recency and do not have a strong search query yet.
-- Use `memory_get` only when you already have an exact memory id.
-- Use `reasoning_list_sessions` when you want to find older reasoning sessions but do not know the session id yet.
-- Use `reasoning_get_trace` only when you need the full ordered trace of a known prior session.
+1. Call `reasoning_start_session` before the main investigation.
+2. Add meaningful steps with `reasoning_add_step`.
+3. Finish with `reasoning_complete_session`.
 
-Do not browse with `memory_search` when you have no query.
-Do not use `memory_list` when a precise keyword search would be better.
-Do not use `reasoning_get_trace` when a durable conclusion should have been retrieved from memory instead.
+Do not:
 
-### 4. Log only meaningful reasoning steps
+- open a reasoning session after the important decisions already happened
+- log every tiny action
+- leave sessions open without an explicit end state
 
-While a session is `in_progress`, call `reasoning_add_step` only when at least one of these happened:
+Good `reasoning_add_step` events:
 
-- a new hypothesis or decision was formed
-- a meaningful action was taken
-- an observation changed understanding
-- an option was accepted or rejected for a reason
-- an intermediate conclusion is worth preserving
+- a new hypothesis
+- a decision
+- a rejected option
+- an observation that changed understanding
+- an action that materially moved the task forward
 
-Each step must include at least one of:
+Bad `reasoning_add_step` events:
 
-- `thought`
-- `action`
-- `observation`
+- every shell command
+- every file read
+- scratch noise with no durable value
 
-Do not log every keystroke, every tiny command, or noisy scratch work.
-Do not call `reasoning_add_step` on a completed or abandoned session.
+## Memory Workflow
 
-### 5. Finish the session explicitly
+Use `memory_save` only for durable conclusions, not for live scratch work.
 
-At the end of the task:
-
-- use `reasoning_complete_session(status="completed")` when a conclusion was reached
-- use `reasoning_complete_session(status="abandoned")` when the work was dropped or could not be completed
-
-Do not leave stale sessions open without reason.
-
-### 6. Persist only durable conclusions
-
-Use `save_as_memory=true` in `reasoning_complete_session` only when the conclusion is worth long-term recall.
-
-Good candidates:
+Good memory candidates:
 
 - stable facts
-- durable user or agent preferences
+- user or agent preferences
 - decisions likely to matter again
-- distilled reasoning outcomes worth reusing later
+- distilled reasoning outcomes
 
-Bad candidates:
+Bad memory candidates:
 
-- transient debugging noise
-- temporary hypotheses
-- partial work notes
 - full traces
-- context that will be stale quickly
+- transient debugging notes
+- secrets or tokens
+- stale implementation minutiae
 
-## Tool Rules
+## Tool-Specific Guidance
 
 ### `memory_search`
 
 Use when:
 
-- you have a concrete topic, keyword, or hypothesis
-- you want relevance-ranked results from stored memory content and tags
+- you have a real topic, keyword, or hypothesis
 
 Do not use when:
 
-- you only want to browse broadly
-- you do not have a useful query yet
-
-Preferred next step:
-
-- `memory_get` if one result needs close reading
-- return to the current reasoning session if the search answered the question
-
-Common mistakes:
-
-- using it as a browse tool
-- using vague queries when a better keyword is available
+- you are just browsing broadly
 
 ### `memory_list`
 
 Use when:
 
-- you need browsing rather than keyword search
-- you want to filter by `type`, `agent_id`, `tags`, or `min_importance`
-- you want recent or important memories without a query
+- you need recent or filtered browsing by type, tags, agent, or importance
 
 Do not use when:
 
-- the question already has a clear search term
-
-Preferred next step:
-
-- `memory_get` for a chosen item
-- `memory_search` after browsing suggests a better query
-
-Common mistakes:
-
-- listing too much data instead of narrowing the filter
-- using it where `memory_search` would be more precise
+- you already know the search terms
 
 ### `memory_get`
 
 Use when:
 
-- you already know the exact memory id
-
-Do not use when:
-
-- you still need to discover which record matters
-
-Preferred next step:
-
-- continue reasoning with the retrieved fact
-
-Common mistakes:
-
-- treating it like search
-
-### `memory_save`
-
-Use when:
-
-- you have a self-contained durable fact, preference, episodic note, decision, or reasoning summary worth keeping
-
-Do not use when:
-
-- the information is only useful in the current task
-- the content is a full trace or raw chain of thought
-
-Preferred next step:
-
-- continue the task; do not create extra workflow around a small save
-
-Common mistakes:
-
-- saving noisy transcripts
-- saving weak conclusions that are not durable
+- you already have the exact memory id
 
 ### `memory_update`
 
 Use when:
 
-- an existing memory is wrong, outdated, misclassified, or needs corrected tags/metadata
-
-Do not use when:
-
-- the new fact should exist as a separate memory rather than overwriting history
-
-Preferred next step:
-
-- if the correction happened during a live investigation, note the decision in the reasoning session when useful
-
-Common mistakes:
-
-- overwriting older context that still has historical value
+- an existing memory should be corrected in place
 
 ### `memory_delete`
 
 Use when:
 
-- a memory is incorrect, duplicated, unsafe, or should not exist
-
-Do not use when:
-
-- the record is merely old but still historically useful
-
-Preferred next step:
-
-- create or keep a correct replacement only if long-term recall still matters
-
-Common mistakes:
-
-- deleting when an update would preserve useful history
-
-### `reasoning_start_session`
-
-Use when:
-
-- the task is non-trivial and multi-step
-- the task has uncertainty, branching, debugging, planning, or trade-offs
-
-Do not use when:
-
-- the task is a trivial one-shot lookup
-
-Preferred next step:
-
-- `reasoning_add_step` for meaningful progress
-- `memory_search` or `memory_list` if prior context is needed
-
-Common mistakes:
-
-- starting the session too late
-- opening sessions for tiny tasks
-
-### `reasoning_add_step`
-
-Use when:
-
-- you have meaningful `thought`, `action`, or `observation` to record
-
-Do not use when:
-
-- nothing important changed
-- the session is no longer `in_progress`
-
-Preferred next step:
-
-- continue the investigation
-- call the next read/write tool only if it changes understanding or records a conclusion
-
-Common mistakes:
-
-- logging every small action
-- omitting all three fields
+- a memory is wrong, duplicated, or unsafe to keep
 
 ### `reasoning_list_sessions`
 
 Use when:
 
-- you want to locate related past reasoning sessions
-- you do not yet know the exact session id
+- you need to find prior sessions without knowing the id
 
-Do not use when:
+Notes:
 
-- you already know the session to inspect
-- what you actually need is a durable fact from memory
-
-Preferred next step:
-
-- `reasoning_get_trace` for the chosen session if you need the full trace
-
-Common mistakes:
-
-- using session history instead of memory for stable conclusions
+- results include grouped `step_count`
+- optional filters: `agent_id`, `status`, `limit`, `offset`
 
 ### `reasoning_get_trace`
 
 Use when:
 
-- you already know which prior session you need
-- you need the full ordered trace, not just a summary
+- you need the full ordered step history for a known session
 
 Do not use when:
 
-- a stored memory would answer the question well enough
+- a durable memory already answers the question
 
-Preferred next step:
+### `reasoning_mark_step`
 
-- extract only the useful conclusion into the current reasoning flow
+Use when:
 
-Common mistakes:
+- a step should be marked for later audit or summary views
 
-- copying full old traces into memory
-- reading traces when a durable summary would be enough
+Supported `mark_type` values:
+
+- `milestone`
+- `decision`
+- `conflict`
+- `important`
+- `hypothesis`
+
+Semantics:
+
+- one `(step_id, mark_type)` row only
+- same mark with new `note` updates that note
+- same mark without `note` keeps the current note
+
+### `reasoning_search_steps`
+
+Use when:
+
+- you need direct search across reasoning trace text
+
+Notes:
+
+- searches `thought`, `action`, and `observation`
+- uses FTS, not plain `LIKE`
+- supports optional `session_id`, `agent_id`, and `mark_type` filters
+
+### `reasoning_list_milestones`
+
+Use when:
+
+- you want marked steps without loading a whole trace
+
+Returns:
+
+- session id
+- step id
+- step number
+- mark type
+- note
+- timestamp
+- short snippet
+
+### `reasoning_get_session_outline`
+
+Use when:
+
+- you need a compact audit view of one session
+
+Behavior:
+
+- if marks exist, returns marked steps in deterministic order
+- otherwise falls back to first, middle, last
 
 ### `reasoning_complete_session`
 
 Use when:
 
-- the session reached a final conclusion
-- the work is being explicitly abandoned
+- the session reached a conclusion
+- the work is being abandoned explicitly
 
-Do not use when:
+Notes:
 
-- the task is still actively in progress
+- `save_as_memory=true` stores only the conclusion summary
+- it does not persist the full reasoning trace into memory
 
-Preferred next step:
+## Audit Layer Notes
 
-- set `save_as_memory=true` only for durable conclusions worth later reuse
+This repo now includes a lightweight reasoning audit layer:
 
-Common mistakes:
+- `reasoning_step_marks` stores explicit marks
+- `reasoning_steps_fts` supports search over step text
+- milestone and outline views are derived from trace data
 
-- forgetting to complete the session
-- saving every conclusion as memory without quality filtering
+Do not assume this is a tamper-evident audit log. It is an audit-oriented retrieval layer over agent-managed reasoning records.
 
-## Quality Guardrails
+## Safety Rules
 
-Before calling a tool, check these:
+Never store:
 
-- Is this task truly non-trivial enough to require `reasoning_start_session`?
-- If I need stored context, do I have a real query for `memory_search`, or should I browse with `memory_list`?
-- Do I already have an exact id, making `memory_get` the correct tool?
-- Is this reasoning step meaningful enough for `reasoning_add_step`?
-- Is the session still `in_progress` before I add a step?
-- Is the conclusion durable enough to justify `save_as_memory=true` or `memory_save`?
-- Am I about to store a secret, a transcript, or short-lived noise?
+- passwords
+- API keys
+- tokens
+- raw sensitive personal data
+- full hidden chain-of-thought copied into durable memory
+
+Also:
+
+- `agent_id` is a filtering aid, not a real authorization boundary
+- validate assumptions against schemas and handlers, not just this document
+
+## Schema And Upgrade Notes
+
+Database schema is migration-based.
+
+Current migration set:
+
+- `0001_initial`
+- `0002_reasoning_step_marks`
+- `0003_reasoning_steps_fts`
+
+If you are reasoning about compatibility or startup behavior, inspect:
+
+- `src/db.ts`
+- `src/migrations/index.ts`
+- `src/migrations/*.ts`
+
+## Minimal Rule Of Thumb
+
+- durable reusable knowledge -> `memory_*`
+- live multi-step task trace -> `reasoning_*`
+- non-trivial task -> start reasoning early
+- audit/navigation over reasoning history -> use mark/search/milestone/outline tools instead of replaying everything
