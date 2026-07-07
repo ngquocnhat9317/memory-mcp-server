@@ -9,18 +9,20 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { DB_PATH } from "./constants.js";
+import { DB_PATH, MCP_VERSION } from "./constants.js";
 import "./db.js"; // ensures schema is created before tools run
 import { registerMemoryTools } from "./tools/memory.js";
 import { registerReasoningTools } from "./tools/reasoning.js";
+import { registerUsageGuideTool } from "./tools/usage-guide.js";
 
 const server = new McpServer({
   name: "memory-mcp-server",
-  version: "1.0.0",
+  version: MCP_VERSION,
 });
 
 registerMemoryTools(server);
 registerReasoningTools(server);
+registerUsageGuideTool(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
