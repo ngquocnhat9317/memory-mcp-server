@@ -95,7 +95,7 @@ test("Mark Reasoning Step updates the existing mark for the same step and type",
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -184,7 +184,7 @@ test("Mark Reasoning Step keeps the existing note when a repeated write omits no
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -252,7 +252,7 @@ test("Search Reasoning Steps prefers snippet text from the field matching the qu
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -337,7 +337,7 @@ test("List Reasoning Sessions reports grouped step counts", async () => {
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -424,7 +424,7 @@ test("List Reasoning Milestones returns marked steps in deterministic order", as
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -539,7 +539,7 @@ test("reasoning_get_session_outline falls back to first middle last deterministi
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -651,7 +651,7 @@ test("reasoning_get_session_outline prefers marked steps ordered by mark time th
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -775,7 +775,7 @@ test("Add Reasoning Step uses the maximum existing step number when allocating t
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -843,7 +843,7 @@ test("Complete Reasoning Session rolls back the session update if memory save fa
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -924,7 +924,7 @@ test("Complete Reasoning Session does not emit a completed warning for abandoned
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1002,7 +1002,7 @@ test("Complete Reasoning Session does not auto-save memory by default", async ()
 
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerReasoningTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1069,7 +1069,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
   const { registerMemoryTools } = await import("../tools/memory.js");
   const { registerUsageGuideTool } = await import("../tools/usage-guide.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
   registerUsageGuideTool(server, toolDb);
 
@@ -1088,14 +1088,14 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     const result = await getGuide({
       agent_id: "agent-guide",
       client_name: "codex",
-      client_version: "1.1.0",
+      client_version: "1.1.5",
     });
 
     assert.equal(result.isError, undefined);
     assert.equal(result.content[0]?.text, expectedGuide);
     assert.deepEqual(result.structuredContent, {
       guide_version: "2026-07-07.v1",
-      mcp_version: "1.1.0",
+      mcp_version: "1.1.5",
       path: "GUIDELINES.md",
       format: "markdown",
       content: expectedGuide,
@@ -1137,7 +1137,7 @@ test("usage and adoption reports reflect telemetry from memory and reasoning too
   const { registerMemoryTools } = await import("../tools/memory.js");
   const { registerReasoningTools } = await import("../tools/reasoning.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
   registerReasoningTools(server, toolDb);
 
@@ -1303,7 +1303,7 @@ test("memory_usage_report treats date_to as end-of-day for YYYY-MM-DD filters", 
 
   const { registerMemoryTools } = await import("../tools/memory.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1326,7 +1326,7 @@ test("memory_usage_report treats date_to as end-of-day for YYYY-MM-DD filters", 
       "agent-a",
       null,
       null,
-      "1.1.0",
+      "1.1.5",
       null,
       "memory_search",
       "memory",
@@ -1368,7 +1368,7 @@ test("memory_agent_scorecard keeps unknown-agent rows scoped to NULL agents and 
 
   const { registerMemoryTools } = await import("../tools/memory.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1403,7 +1403,7 @@ test("memory_agent_scorecard keeps unknown-agent rows scoped to NULL agents and 
       null,
       null,
       null,
-      "1.1.0",
+      "1.1.5",
       null,
       "reasoning_start_session",
       "reasoning",
@@ -1432,7 +1432,7 @@ test("memory_agent_scorecard keeps unknown-agent rows scoped to NULL agents and 
       "agent-report-only",
       null,
       null,
-      "1.1.0",
+      "1.1.5",
       null,
       "memory_usage_report",
       "report",
@@ -1474,7 +1474,7 @@ test("memory_record_usage_feedback rejects invalid related events and records te
 
   const { registerMemoryTools } = await import("../tools/memory.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1543,7 +1543,7 @@ test("memory_record_usage_feedback rejects unverifiable multi-memory recall even
 
   const { registerMemoryTools } = await import("../tools/memory.js");
 
-  const server = new McpServer({ name: "test-server", version: "1.1.0" });
+  const server = new McpServer({ name: "test-server", version: "1.1.5" });
   registerMemoryTools(server, toolDb);
 
   const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
@@ -1583,7 +1583,7 @@ test("memory_record_usage_feedback rejects unverifiable multi-memory recall even
       null,
       null,
       null,
-      "1.1.0",
+      "1.1.5",
       null,
       "memory_search",
       "memory",
@@ -1626,7 +1626,7 @@ test("memory_record_usage_feedback fails clearly when telemetry persistence is d
   try {
     const { registerMemoryTools } = await import(`../tools/memory.js?telemetry-off=${Date.now()}`);
 
-    const server = new McpServer({ name: "test-server", version: "1.1.0" });
+    const server = new McpServer({ name: "test-server", version: "1.1.5" });
     registerMemoryTools(server, toolDb);
 
     const registeredTools = (server as unknown as { _registeredTools: RegisteredToolMap })
