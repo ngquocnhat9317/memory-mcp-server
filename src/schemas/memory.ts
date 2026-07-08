@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+const REPORT_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidReportDate(value: string): boolean {
+  if (REPORT_DATE_ONLY_RE.test(value)) return true;
+  return !Number.isNaN(Date.parse(value));
+}
+
+const ReportDateInputSchema = z
+  .string()
+  .max(50)
+  .refine(isValidReportDate, {
+    message: "Expected YYYY-MM-DD or a valid date-time string.",
+  });
+
 export const MemoryTypeEnum = z.enum([
   "fact",
   "preference",
@@ -137,11 +151,25 @@ export const MemoryUpdateInputSchema = z
       .max(20)
       .optional()
       .describe("Replaces the full tag list (not merged), if provided."),
+    tags_append: z
+      .array(z.string().min(1).max(50))
+      .max(20)
+      .optional()
+      .describe("Tags to append when not replacing the full tag list."),
+    tags_remove: z
+      .array(z.string().min(1).max(50))
+      .max(20)
+      .optional()
+      .describe("Tags to remove when not replacing the full tag list."),
     importance: z.number().int().min(1).max(5).optional().describe("New importance, if changing it."),
     metadata: z
       .record(z.unknown())
       .optional()
       .describe("Replaces the full metadata object (not merged), if provided."),
+    metadata_patch: z
+      .record(z.unknown())
+      .optional()
+      .describe("Shallow metadata patch to merge when not replacing the full metadata object."),
   })
   .strict();
 export type MemoryUpdateInput = z.infer<typeof MemoryUpdateInputSchema>;
@@ -152,3 +180,84 @@ export const MemoryDeleteInputSchema = z
   })
   .strict();
 export type MemoryDeleteInput = z.infer<typeof MemoryDeleteInputSchema>;
+
+export const MemoryGetUsageGuideInputSchema = z
+  .object({
+    agent_id: z.string().max(100).optional(),
+    client_name: z.string().max(100).optional(),
+    client_version: z.string().max(100).optional(),
+  })
+  .strict();
+export type MemoryGetUsageGuideInput = z.infer<
+  typeof MemoryGetUsageGuideInputSchema
+>;
+
+export const MemoryUsageReportGroupByEnum = z.enum([
+  "tool_name",
+  "agent_id",
+  "client_name",
+  "mcp_version",
+  "operation_type",
+  "status",
+  "day",
+]);
+
+export const MemoryUsageReportInputSchema = z
+  .object({
+    agent_id: z.string().max(100).optional(),
+    client_name: z.string().max(100).optional(),
+    mcp_version: z.string().max(50).optional(),
+    date_from: ReportDateInputSchema.optional(),
+    date_to: ReportDateInputSchema.optional(),
+    group_by: MemoryUsageReportGroupByEnum.default("tool_name"),
+    limit: z.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type MemoryUsageReportInput = z.infer<
+  typeof MemoryUsageReportInputSchema
+>;
+
+export const MemoryAdoptionReportInputSchema = z
+  .object({
+    agent_id: z.string().max(100).optional(),
+    date_from: ReportDateInputSchema.optional(),
+    date_to: ReportDateInputSchema.optional(),
+    limit: z.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type MemoryAdoptionReportInput = z.infer<
+  typeof MemoryAdoptionReportInputSchema
+>;
+
+export const MemoryAgentScorecardInputSchema = z
+  .object({
+    agent_id: z.string().max(100).optional(),
+    date_from: ReportDateInputSchema.optional(),
+    date_to: ReportDateInputSchema.optional(),
+    limit: z.number().int().min(1).max(200).default(20),
+  })
+  .strict();
+export type MemoryAgentScorecardInput = z.infer<
+  typeof MemoryAgentScorecardInputSchema
+>;
+
+export const MemoryFeedbackUsefulnessEnum = z.enum([
+  "used",
+  "ignored",
+  "irrelevant",
+  "stale",
+  "unsafe_to_use",
+]);
+
+export const MemoryRecordUsageFeedbackInputSchema = z
+  .object({
+    memory_id: z.string().min(1),
+    event_id: z.string().min(1).optional(),
+    agent_id: z.string().max(100).optional(),
+    usefulness: MemoryFeedbackUsefulnessEnum,
+    reason: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+export type MemoryRecordUsageFeedbackInput = z.infer<
+  typeof MemoryRecordUsageFeedbackInputSchema
+>;

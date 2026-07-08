@@ -169,11 +169,36 @@ export const ReasoningCompleteSessionInputSchema = z
       .describe(
         "If true, also create a long-term memory (type='reasoning_summary') containing the conclusion, so it can be recalled later via memory_search."
       ),
+    memory_mode: z
+      .enum(["auto", "always", "never"])
+      .optional()
+      .describe(
+        "Preferred memory persistence mode. 'auto' saves durable completed conclusions by default, 'always' forces a save, and 'never' skips saving."
+      ),
+    memory_type: z
+      .enum(["fact", "preference", "episodic", "decision", "reasoning_summary"])
+      .optional()
+      .describe("Memory type to use when a completion is persisted."),
+    memory_importance: z
+      .number()
+      .int()
+      .min(1)
+      .max(5)
+      .optional()
+      .describe("Importance to use when a completion is persisted as memory."),
     memory_tags: z
       .array(z.string().min(1).max(50))
       .max(20)
       .default([])
       .describe("Tags to attach to the created memory, only used when save_as_memory is true."),
+    not_saved_reason: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        "Required when memory_mode='never' to explain why the conclusion should not be kept as durable memory."
+      ),
   })
   .strict();
 export type ReasoningCompleteSessionInput = z.infer<

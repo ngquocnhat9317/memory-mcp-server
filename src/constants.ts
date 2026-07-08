@@ -3,6 +3,8 @@ import os from "node:os";
 
 /** Max characters returned in a single tool response before truncation. */
 export const CHARACTER_LIMIT = 25000;
+export const MCP_VERSION = "1.1.0";
+export const TELEMETRY_ENABLED = process.env.MEMORY_TELEMETRY !== "off";
 
 /**
  * Location of the SQLite database file.
