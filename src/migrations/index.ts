@@ -3,6 +3,7 @@ import { nowIso } from "../utils.js";
 import { migration0001Initial } from "./0001_initial.js";
 import { migration0002ReasoningStepMarks } from "./0002_reasoning_step_marks.js";
 import { migration0003ReasoningStepsFts } from "./0003_reasoning_steps_fts.js";
+import { migration0004ToolUsageEvents } from "./0004_tool_usage_events.js";
 
 export interface Migration {
   version: string;
@@ -13,6 +14,7 @@ const migrations: Migration[] = [
   migration0001Initial,
   migration0002ReasoningStepMarks,
   migration0003ReasoningStepsFts,
+  migration0004ToolUsageEvents,
 ];
 
 export function runMigrations(db: DatabaseSync): void {
