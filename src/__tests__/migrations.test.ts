@@ -28,6 +28,7 @@ test("runMigrations creates schema_migrations and applies baseline schema", () =
     assert.ok(tables.some((row) => row.name === "memories"));
     assert.ok(tables.some((row) => row.name === "reasoning_sessions"));
     assert.ok(tables.some((row) => row.name === "reasoning_steps"));
+    assert.ok(tables.some((row) => row.name === "tool_usage_events"));
   } finally {
     db.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -52,6 +53,7 @@ test("runMigrations records all registered migrations after creating the baselin
         "0001_initial",
         "0002_reasoning_step_marks",
         "0003_reasoning_steps_fts",
+        "0004_tool_usage_events",
       ]
     );
   } finally {
