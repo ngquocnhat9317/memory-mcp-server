@@ -30,6 +30,10 @@ High-level split:
 
 No native addon build is required.
 
+> Note: `node:sqlite` is still an experimental Node.js API on Node 22. The server
+> works reliably, but Node prints an `ExperimentalWarning` to stderr on startup,
+> and the API surface may change between Node releases.
+
 ## Install
 
 ```bash
