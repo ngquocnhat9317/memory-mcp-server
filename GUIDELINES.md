@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-07.v1
+Version: 2026-07-10.v1
 
 This file is the single source of truth for how an agent should use this MCP.
 
@@ -28,7 +28,7 @@ This file is the single source of truth for how an agent should use this MCP.
 - `memory_delete`: remove unsafe, duplicated, or wrong memory
 - `reasoning_start_session`: open live trace capture for a non-trivial task
 - `reasoning_add_step`: log a decision, hypothesis, rejected option, or meaningful observation
-- `reasoning_complete_session`: close the session and optionally persist only the conclusion
+- `reasoning_complete_session`: close the session and optionally persist only the conclusion; the conclusion is saved as a memory only when you pass `save_as_memory=true` or `memory_mode='always'` — the default (`auto`) does not save on its own
 
 ## Do Not Store
 

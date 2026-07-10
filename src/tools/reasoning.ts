@@ -29,14 +29,17 @@ import type {
   ReasoningSessionRow,
   ReasoningStepRecord,
 } from "../types.js";
+import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS } from "../constants.js";
 import {
   handleToolError,
   newId,
   nowIso,
+  parseJsonArray,
+  toFtsOrQuery,
   toFtsQuery,
   toLimitedJson,
 } from "../utils.js";
-import { withTelemetry } from "./telemetry.js";
+import { recordToolUsageEvent, withTelemetry } from "./telemetry.js";
 
 function sessionRowToRecord(
   row: ReasoningSessionRow,
@@ -209,6 +212,65 @@ async function resolveDatabase(database?: DatabaseSync): Promise<DatabaseSync> {
   return defaultDatabasePromise;
 }
 
+interface RelatedMemoryRecord {
+  id: string;
+  type: string;
+  importance: number;
+  tags: string[];
+  snippet: string;
+}
+
+function abandonStaleSessions(database: DatabaseSync, now: string): number {
+  if (SESSION_TTL_HOURS <= 0) return 0;
+  const cutoff = new Date(
+    Date.now() - SESSION_TTL_HOURS * 3_600_000
+  ).toISOString();
+  const result = database
+    .prepare(
+      `UPDATE reasoning_sessions
+       SET status = 'abandoned',
+           conclusion = COALESCE(conclusion, 'auto-abandoned: stale session'),
+           updated_at = ?
+       WHERE status = 'in_progress' AND updated_at < ?`
+    )
+    .run(now, cutoff);
+  return Number(result.changes);
+}
+
+function recallRelatedMemories(
+  database: DatabaseSync,
+  title: string
+): RelatedMemoryRecord[] {
+  if (AUTO_RECALL_LIMIT <= 0) return [];
+  try {
+    const rows = database
+      .prepare(
+        `SELECT m.id, m.type, m.content, m.tags, m.importance
+         FROM memories m
+         WHERE m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
+         ORDER BY m.importance DESC, m.updated_at DESC
+         LIMIT ?`
+      )
+      .all(toFtsOrQuery(title), AUTO_RECALL_LIMIT) as Array<{
+      id: string;
+      type: string;
+      content: string;
+      tags: string | null;
+      importance: number;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      importance: row.importance,
+      tags: parseJsonArray(row.tags),
+      snippet: compactSnippetText(row.content),
+    }));
+  } catch {
+    // Recall is best-effort; a bad FTS query must never block session creation.
+    return [];
+  }
+}
+
 export function registerReasoningTools(
   server: McpServer,
   database?: DatabaseSync
@@ -225,7 +287,10 @@ Args:
   - title (string, required): Short description of the task/question, e.g. "Diagnose flaky checkout test".
   - agent_id (string, optional): Identifier for the agent/persona running this session.
 
-Returns: JSON with the new session's id, which must be passed to reasoning_add_step and reasoning_complete_session.
+Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session.
+  - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
+  - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
 Examples:
   - Use when: starting to debug a complex issue, plan a multi-step task, or work through a decision with tradeoffs.
@@ -252,6 +317,18 @@ Examples:
               : null,
           outputShape: {
             session_id: result.structuredContent?.session_id ?? null,
+            related_memory_count: Array.isArray(
+              result.structuredContent?.related_memories
+            )
+              ? result.structuredContent.related_memories.length
+              : 0,
+            open_session_count: Array.isArray(
+              result.structuredContent?.open_sessions
+            )
+              ? result.structuredContent.open_sessions.length
+              : 0,
+            auto_abandoned_sessions:
+              result.structuredContent?.auto_abandoned_sessions ?? 0,
           },
         }),
       },
@@ -260,25 +337,52 @@ Examples:
         const activeDb = await resolveDatabase(database);
         const id = newId("sess");
         const ts = nowIso();
+        const autoAbandoned = abandonStaleSessions(activeDb, ts);
         activeDb
           .prepare(
             `INSERT INTO reasoning_sessions (id, title, agent_id, status, conclusion, created_at, updated_at)
              VALUES (?, ?, ?, 'in_progress', NULL, ?, ?)`
           )
           .run(id, params.title, params.agent_id ?? null, ts, ts);
+
+        const openSessions = activeDb
+          .prepare(
+            `SELECT id, title, updated_at FROM reasoning_sessions
+             WHERE status = 'in_progress' AND id != ?
+             ORDER BY updated_at DESC
+             LIMIT 5`
+          )
+          .all(id) as Array<{ id: string; title: string; updated_at: string }>;
+
+        const relatedMemories = recallRelatedMemories(activeDb, params.title);
+
         const output = {
           session_id: id,
           title: params.title,
           status: "in_progress" as const,
+          related_memories: relatedMemories,
+          ...(openSessions.length > 0
+            ? {
+                open_sessions_warning: `You have ${openSessions.length} other in_progress session(s). Close finished ones with reasoning_complete_session.`,
+                open_sessions: openSessions,
+              }
+            : {}),
+          ...(autoAbandoned > 0
+            ? { auto_abandoned_sessions: autoAbandoned }
+            : {}),
         };
+        const recallNote =
+          relatedMemories.length > 0
+            ? ` Found ${relatedMemories.length} related memories — review them before starting.`
+            : "";
         return {
           content: [
             {
               type: "text" as const,
-              text: `Reasoning session started with id ${id}.\n\n${toLimitedJson(output)}`,
+              text: `Reasoning session started with id ${id}.${recallNote}\n\n${toLimitedJson(output)}`,
             },
           ],
-          structuredContent: output,
+          structuredContent: output as unknown as Record<string, unknown>,
         };
       } catch (error) {
         return {
@@ -1107,13 +1211,14 @@ Args:
   - conclusion (string, required): The final answer/decision reached.
   - status ('completed'|'abandoned', default 'completed'): Use 'abandoned' if the task was dropped without a real conclusion.
   - save_as_memory (boolean, default false): If true, also create a memory with this conclusion.
-  - memory_mode ('auto'|'always'|'never', optional): Auto-saves completed non-empty sessions by default, can be forced or disabled.
+  - memory_mode ('auto'|'always'|'never', optional): 'auto' (default) does NOT save a memory on its own — a memory is only created when save_as_memory=true or memory_mode='always'; 'never' skips saving and requires not_saved_reason.
   - memory_type (optional): Memory type to use when a completion is persisted.
   - memory_importance (optional): Importance to use when a completion is persisted.
   - memory_tags (string[], default []): Tags for the created memory.
   - not_saved_reason (optional): Required when memory_mode='never'.
+  - used_memory_ids (string[], default []): Ids of memories that actually helped during this session (e.g. from related_memories returned by reasoning_start_session). The server records a 'used' usage-feedback event for each.
 
-Returns: JSON with the updated session, created memory id if any, and skip warnings when memory is not saved.
+Returns: JSON with the updated session, created memory id if any, usage-feedback count, and skip warnings when memory is not saved.
 
 Error Handling:
   - Returns "Error: Session '<id>' not found" if the id does not exist.
@@ -1148,7 +1253,7 @@ Error Handling:
           let reasonCategory: string | null = null;
           if (params.memory_mode === "never") reasonCategory = "caller_request";
           else if (params.status === "abandoned") reasonCategory = "not_completed";
-          else if (notSavedReason?.includes("zero reasoning steps")) {
+          else if (notSavedReason?.includes("no reasoning steps")) {
             reasonCategory = "zero_step";
           }
           return {
@@ -1163,6 +1268,7 @@ Error Handling:
               memory_type: params.memory_type ?? null,
               memory_importance: params.memory_importance ?? null,
               tag_count: params.memory_tags?.length ?? 0,
+              used_memory_count: params.used_memory_ids?.length ?? 0,
             },
             outputShape: {
               memory_id_present: typeof structured?.memory_id === "string",
@@ -1255,6 +1361,40 @@ Error Handling:
           return nextMemoryId;
         });
 
+        const usedMemoryWarnings: string[] = [];
+        let usedMemoryFeedbackRecorded = 0;
+        for (const usedMemoryId of new Set(params.used_memory_ids ?? [])) {
+          const exists = activeDb
+            .prepare(`SELECT id FROM memories WHERE id = ?`)
+            .get(usedMemoryId);
+          if (!exists) {
+            usedMemoryWarnings.push(
+              `Memory '${usedMemoryId}' not found; usage feedback skipped.`
+            );
+            continue;
+          }
+          const feedbackEventId = await recordToolUsageEvent(activeDb, {
+            toolName: "memory_record_usage_feedback",
+            operationType: "feedback",
+            accessType: "write",
+            status: "success",
+            agentId: session.agent_id,
+            sessionId: params.session_id,
+            memoryId: usedMemoryId,
+            metadata: {
+              usefulness: "used",
+              source: "reasoning_complete_session",
+            },
+          });
+          if (feedbackEventId) {
+            usedMemoryFeedbackRecorded += 1;
+          } else {
+            usedMemoryWarnings.push(
+              `Telemetry is disabled; usage feedback for '${usedMemoryId}' was not recorded.`
+            );
+          }
+        }
+
         const updatedRow = activeDb
           .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
           .get(params.session_id) as unknown as ReasoningSessionRow;
@@ -1263,10 +1403,13 @@ Error Handling:
           session: record,
           memory_id: memoryId,
           not_saved_reason: notSavedReason,
-          warnings:
-            stepCount === 0 && params.status === "completed"
+          used_memory_feedback_recorded: usedMemoryFeedbackRecorded,
+          warnings: [
+            ...(stepCount === 0 && params.status === "completed"
               ? ["Session completed with zero reasoning steps."]
-              : [],
+              : []),
+            ...usedMemoryWarnings,
+          ],
         };
         return {
           content: [{ type: "text" as const, text: toLimitedJson(output) }],

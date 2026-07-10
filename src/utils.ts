@@ -33,12 +33,22 @@ export function parseJsonObject(
 
 /** FTS5 MATCH queries break on raw punctuation; wrap terms as a safe prefix query. */
 export function toFtsQuery(raw: string): string {
-  const terms = raw
+  const terms = ftsTerms(raw);
+  return terms.length ? terms.join(" ") : '""';
+}
+
+/** Like toFtsQuery but matches ANY term — used for fuzzy recall by title. */
+export function toFtsOrQuery(raw: string): string {
+  const terms = ftsTerms(raw);
+  return terms.length ? terms.join(" OR ") : '""';
+}
+
+function ftsTerms(raw: string): string[] {
+  return raw
     .trim()
     .split(/\s+/)
     .filter(Boolean)
     .map((t) => `"${t.replace(/"/g, '""')}"*`);
-  return terms.length ? terms.join(" ") : '""';
 }
 
 /** Serialize a value to text, truncating with a clear message if it exceeds CHARACTER_LIMIT. */
@@ -58,7 +68,7 @@ export function toLimitedJson(value: unknown): string {
 
 export function handleToolError(error: unknown): string {
   if (error instanceof Error) {
-    // better-sqlite3 constraint violations
+    // node:sqlite constraint violations
     if (error.message.includes("CHECK constraint failed")) {
       return `Error: Invalid value provided (${error.message}). Check allowed ranges/enums in the tool description.`;
     }
