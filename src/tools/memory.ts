@@ -51,13 +51,17 @@ function rowToRecord(row: MemoryRow): MemoryRecord {
   };
 }
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 function tagsFilterClauses(tags: string[] | undefined): {
   clause: string;
   params: string[];
 } {
   if (!tags || tags.length === 0) return { clause: "", params: [] };
-  const clause = tags.map(() => `tags LIKE ?`).join(" AND ");
-  const params = tags.map((tag) => `%"${tag}"%`);
+  const clause = tags.map(() => `tags LIKE ? ESCAPE '\\'`).join(" AND ");
+  const params = tags.map((tag) => `%"${escapeLikePattern(tag)}"%`);
   return { clause: ` AND ${clause}`, params };
 }
 
@@ -72,6 +76,16 @@ function resultCount(result: ToolResponse): number {
   }
   if (Array.isArray(structured?.results)) return structured.results.length;
   return result.content[0]?.text.startsWith("No memories found") ? 0 : 1;
+}
+
+/** Ids of memories returned by a search/list call, bounded so telemetry rows stay small. */
+function returnedMemoryIds(result: ToolResponse): string[] {
+  const structured = extractStructuredContent(result);
+  if (!Array.isArray(structured?.results)) return [];
+  return (structured.results as Array<{ id?: unknown }>)
+    .slice(0, 20)
+    .map((row) => String(row.id))
+    .filter((id) => id !== "undefined");
 }
 
 function telemetryPersistenceEnabled(): boolean {
@@ -304,8 +318,7 @@ export function registerMemoryTools(
           },
           outputShape: {
             result_count: resultCount(result),
-            has_more:
-              extractStructuredContent(result)?.has_more === true,
+            memory_ids: returnedMemoryIds(result),
           },
         }),
       },
@@ -399,6 +412,7 @@ export function registerMemoryTools(
             result_count: resultCount(result),
             has_more:
               extractStructuredContent(result)?.has_more === true,
+            memory_ids: returnedMemoryIds(result),
           },
         }),
       },
@@ -937,7 +951,6 @@ export function registerMemoryTools(
              FROM tool_usage_events
              WHERE ${eventFilter.clause}
                AND operation_type = 'feedback'
-               AND related_event_id IS NOT NULL
                AND status = 'success'`
           )
           .get(...eventFilter.args) as { used_count: number | null };
@@ -1138,7 +1151,6 @@ export function registerMemoryTools(
                FROM tool_usage_events
                WHERE ${agentEventFilter.clause}
                  AND operation_type = 'feedback'
-                 AND related_event_id IS NOT NULL
                  AND status = 'success'
                  AND json_extract(metadata, '$.usefulness') = 'used'`
             )
@@ -1237,10 +1249,6 @@ export function registerMemoryTools(
           },
           outputShape: {
             recorded: result.isError !== true,
-            event_id:
-              typeof result.structuredContent?.event_id === "string"
-                ? result.structuredContent.event_id
-                : null,
           },
           metadata: {
             usefulness: params.usefulness,
@@ -1280,19 +1288,29 @@ export function registerMemoryTools(
         if (params.event_id) {
           const relatedEvent = activeDb
             .prepare(
-              `SELECT id
+              `SELECT id, memory_id, output_shape
                FROM tool_usage_events
-               WHERE id = ?
-                 AND tool_name = 'memory_get'
-                 AND memory_id = ?`
+               WHERE id = ?`
             )
-            .get(params.event_id, params.memory_id) as { id: string } | undefined;
-          if (!relatedEvent) {
+            .get(params.event_id) as
+            | { id: string; memory_id: string | null; output_shape: string | null }
+            | undefined;
+          const recalledIds = relatedEvent
+            ? (parseJsonObject(relatedEvent.output_shape)?.memory_ids as
+                | unknown[]
+                | undefined)
+            : undefined;
+          const verified =
+            relatedEvent !== undefined &&
+            (relatedEvent.memory_id === params.memory_id ||
+              (Array.isArray(recalledIds) &&
+                recalledIds.includes(params.memory_id)));
+          if (!verified) {
             return {
               content: [
                 {
                   type: "text" as const,
-                  text: `Error: Related event '${params.event_id}' cannot be verified for memory '${params.memory_id}'. Use a matching memory_get event.`,
+                  text: `Error: Related event '${params.event_id}' cannot be verified for memory '${params.memory_id}'. Use an event that recalled this memory (memory_get, memory_search, or memory_list).`,
                 },
               ],
               isError: true,
@@ -1301,7 +1319,7 @@ export function registerMemoryTools(
         }
 
         const output = {
-          event_id: null,
+          recorded: true,
           memory_id: params.memory_id,
           usefulness: params.usefulness,
         };

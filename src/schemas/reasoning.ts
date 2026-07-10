@@ -173,7 +173,7 @@ export const ReasoningCompleteSessionInputSchema = z
       .enum(["auto", "always", "never"])
       .optional()
       .describe(
-        "Preferred memory persistence mode. 'auto' saves durable completed conclusions by default, 'always' forces a save, and 'never' skips saving."
+        "Preferred memory persistence mode. 'auto' (default) does not save on its own — a memory is only created when save_as_memory=true or memory_mode='always'; 'never' skips saving and requires not_saved_reason."
       ),
     memory_type: z
       .enum(["fact", "preference", "episodic", "decision", "reasoning_summary"])
@@ -198,6 +198,13 @@ export const ReasoningCompleteSessionInputSchema = z
       .optional()
       .describe(
         "Required when memory_mode='never' to explain why the conclusion should not be kept as durable memory."
+      ),
+    used_memory_ids: z
+      .array(z.string().min(1))
+      .max(50)
+      .default([])
+      .describe(
+        "Ids of memories that were actually used/helpful during this session (e.g. ones returned in related_memories by reasoning_start_session). The server records a 'used' usage-feedback event for each, so recall usefulness can be measured."
       ),
   })
   .strict();
