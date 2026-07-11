@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-11.v1
+Version: 2026-07-11.v3
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -41,8 +41,9 @@ Always close the session with `reasoning_complete_session`:
 
 - `conclusion`: the actual answer/decision, written to be reusable.
 - `used_memory_ids`: ids of memories (e.g. from `related_memories`) that
-  genuinely helped. This is how recall quality gets measured — report honestly,
-  including reporting none.
+  genuinely helped. Report honestly, including reporting none. Usage feedback
+  is a learning signal for recall quality and is always recorded locally,
+  regardless of the `MEMORY_TELEMETRY` setting.
 - Saving the conclusion as durable memory is opt-in: pass
   `save_as_memory=true` or `memory_mode='always'`. The default (`auto`) does
   NOT save on its own. Save when the conclusion would help a future task;
@@ -62,7 +63,8 @@ Durable memory:
 - `memory_update`: correct an existing memory in place
 - `memory_delete`: remove unsafe, duplicated, or wrong memory
 - `memory_record_usage_feedback`: record whether a recalled memory was
-  used/ignored/stale — prefer `used_memory_ids` at completion for the common case
+  used/ignored/stale — prefer `used_memory_ids` at completion for the common
+  case; always persisted locally regardless of `MEMORY_TELEMETRY`
 
 Reasoning traces:
 
@@ -77,7 +79,9 @@ Audit & reports (mostly for reviewers and operators, not everyday tasks):
   `reasoning_get_session_outline`, `reasoning_search_steps`: navigate traces
   by their pivotal moments
 - `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`:
-  telemetry-backed views of how memory/reasoning is actually being used
+  telemetry-backed views of how memory/reasoning is actually being used — with
+  `MEMORY_TELEMETRY` off (the default) only usage-feedback events and session
+  tables have data; full funnels and ratios need `MEMORY_TELEMETRY=on`
 
 ## Do Not Store
 

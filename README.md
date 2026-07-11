@@ -5,29 +5,65 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node >= 22.5](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](#requirements)
 
-Long-term memory and reasoning traces for AI agents — **with built-in analytics
-that tell you whether your agents actually use it.**
+**Memory that runs itself** — your agent remembers past work without being
+told, and you maintain nothing.
+
+Long-term memory and reasoning traces for AI agents.
 
 - **Durable memory** across tasks and sessions (SQLite + full-text search)
 - **Reasoning traces**: per-task step-by-step records you can search and audit
 - **Auto-recall**: starting a session automatically surfaces related memories
-- **Adoption telemetry**: usage reports, an adoption funnel, and per-agent
-  scorecards — measure recall hit rate, save rate, and reuse instead of hoping
+- **Self-cleaning**: stale sessions are auto-abandoned instead of piling up
 
 Runs over stdio. Local only, no network service, no native addon build.
+
+## What it feels like
+
+**Session 1 — Tuesday.** Your agent debugs a flaky checkout test and closes its
+reasoning session:
+
+```
+reasoning_complete_session
+  conclusion: "checkout retry logic must reopen the connection before retrying"
+  save_as_memory: true
+→ memory mem_a1b2… saved
+```
+
+**Session 2 — Friday, fresh context, nobody mentions Tuesday.** The agent starts
+a related task:
+
+```
+reasoning_start_session  title: "checkout intermittently times out under load"
+→ related_memories: [
+    {
+      snippet: "checkout retry logic must reopen the connection before retrying",
+      source: { session_title: "diagnose flaky checkout retry logic",
+                session_id: "sess_9f3c…", created_at: "…Tue…" }
+    }
+  ]
+```
+
+No one asked it to search. The Tuesday conclusion surfaces on its own, with its
+origin attached — and `reasoning_get_trace(source.session_id)` replays exactly
+how it was reached.
 
 ## Why this one?
 
 Most memory servers store what you save and hope the agent remembers to search.
 In practice agents don't: they write memories nobody ever reads. This server
-closes that loop:
+makes the right behavior the default behavior:
 
 | | typical memory MCP | this server |
 | --- | --- | --- |
 | Recall | agent must remember to search | server auto-recalls related memories at session start |
 | Reasoning traces | — | first-class sessions with steps, marks, outlines |
 | Stale state | grows forever | stale sessions auto-abandoned (configurable TTL) |
-| "Is it working?" | unknown | `memory_adoption_report` + `memory_agent_scorecard` answer with data |
+
+For teams running **multiple agent personas**, there is also an opt-in telemetry
+layer (`MEMORY_TELEMETRY=on`) with usage reports, an adoption funnel, and
+per-agent scorecards to compare how each persona actually uses memory. If you
+run a single agent for yourself, you can ignore it — everything above works
+without it.
 
 ## Quick Install
 
@@ -37,7 +73,7 @@ closes that loop:
 claude mcp add memory -- npx -y @nhatnguyen9317/memory-mcp-server
 ```
 
-### Claude Desktop / Codex / Cursor (JSON config)
+### Claude Desktop / Cursor / Antigravity (JSON config)
 
 ```json
 {
@@ -52,6 +88,17 @@ claude mcp add memory -- npx -y @nhatnguyen9317/memory-mcp-server
 
 Optionally pin the database location with `"env": {"MEMORY_DB_PATH": "/path/to/memory.db"}`
 (default: `~/.memory-mcp-server/memory.db`).
+
+### Codex CLI (TOML config)
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.memory]
+enabled = true
+command = "npx"
+args = ["-y", "@nhatnguyen9317/memory-mcp-server"]
+```
 
 Verify the connection by calling a cheap read-only tool such as `get_usage_guide`
 or `memory_list`.
@@ -75,10 +122,13 @@ or `memory_list`.
    and can mark pivotal steps for later audit.
 3. **Task end** — `reasoning_complete_session` records the conclusion,
    optionally saves it as durable memory, and accepts `used_memory_ids` so the
-   server can measure which recalled memories actually helped.
-4. **Anytime** — `memory_adoption_report` shows the funnel (sessions →
-   completions → saves → recalls → reuse) with risk flags;
-   `memory_agent_scorecard` compares agents' habits and suggests corrections.
+   server learns which recalled memories actually helped. This usage feedback
+   is a local learning signal and is always recorded, regardless of the
+   telemetry setting.
+4. **Optional, for multi-agent operators** — with `MEMORY_TELEMETRY=on`,
+   `memory_adoption_report` shows the funnel (sessions → completions → saves →
+   recalls → reuse) with risk flags, and `memory_agent_scorecard` compares
+   agent personas' habits and suggests corrections.
 
 Agents learn the rules at runtime by calling `get_usage_guide`, which returns
 the versioned [GUIDELINES.md](./GUIDELINES.md).
@@ -90,7 +140,7 @@ the versioned [GUIDELINES.md](./GUIDELINES.md).
 | `MEMORY_DB_PATH` | `~/.memory-mcp-server/memory.db` | SQLite database location |
 | `MEMORY_SESSION_TTL_HOURS` | `24` | Auto-abandon in_progress sessions older than this (`0` disables) |
 | `MEMORY_AUTO_RECALL_LIMIT` | `3` | Max related memories returned at session start (`0` disables) |
-| `MEMORY_TELEMETRY` | on | Set `off` to disable usage-event recording |
+| `MEMORY_TELEMETRY` | `off` | Set `on` to record diagnostics events locally (searches, saves, recalls, latency) — required for full data in the report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`). Usage feedback (`used_memory_ids`, `memory_record_usage_feedback`) is a learning signal, not diagnostics: it is always recorded locally, with this flag on or off |
 
 ### Shared vs project-scoped memory
 

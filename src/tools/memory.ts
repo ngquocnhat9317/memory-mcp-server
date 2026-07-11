@@ -22,6 +22,7 @@ import {
   type MemoryUpdateInput,
   type MemoryUsageReportInput,
 } from "../schemas/memory.js";
+import { isTelemetryEnabled } from "../constants.js";
 import type { MemoryRecord, MemoryRow } from "../types.js";
 import {
   handleToolError,
@@ -69,6 +70,20 @@ function extractStructuredContent(result: ToolResponse): Record<string, unknown>
   return result.structuredContent ?? null;
 }
 
+/**
+ * Reports aggregate tool_usage_events; with telemetry off only successful
+ * usage-feedback rows exist, so say so in the output itself — an agent
+ * reading only the JSON must not mistake empty funnels for real zeros.
+ */
+function telemetryOffNote(): { telemetry_note: string } | Record<string, never> {
+  return isTelemetryEnabled()
+    ? {}
+    : {
+        telemetry_note:
+          "MEMORY_TELEMETRY is off (the default): only successful usage-feedback events are recorded, so counts other than feedback are incomplete. Set MEMORY_TELEMETRY=on for full data.",
+      };
+}
+
 function resultCount(result: ToolResponse): number {
   const structured = extractStructuredContent(result);
   if (structured?.total_returned !== undefined) {
@@ -88,9 +103,6 @@ function returnedMemoryIds(result: ToolResponse): string[] {
     .filter((id) => id !== "undefined");
 }
 
-function telemetryPersistenceEnabled(): boolean {
-  return process.env.MEMORY_TELEMETRY !== "off";
-}
 
 function normalizeTextDate(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -168,26 +180,31 @@ function buildTelemetryWhere(params: {
   return { clause: conditions.join(" AND "), args };
 }
 
-function buildSessionWhere(params: {
-  agent_id?: string | null;
-  date_from?: string;
-  date_to?: string;
-}): {
+function buildSessionWhere(
+  params: {
+    agent_id?: string | null;
+    date_from?: string;
+    date_to?: string;
+  },
+  // Set when the query joins reasoning_steps: both tables have created_at,
+  // so unqualified column names are ambiguous.
+  columnPrefix = ""
+): {
   clause: string;
   args: Array<string | number>;
 } {
   const conditions = ["1=1"];
   const args: Array<string | number> = [];
 
-  appendAgentFilter(conditions, args, "agent_id", params.agent_id);
+  appendAgentFilter(conditions, args, `${columnPrefix}agent_id`, params.agent_id);
   const dateFrom = normalizeDateBoundary(params.date_from, "start");
   if (dateFrom) {
-    conditions.push("created_at >= ?");
+    conditions.push(`${columnPrefix}created_at >= ?`);
     args.push(dateFrom);
   }
   const dateTo = normalizeDateBoundary(params.date_to, "end");
   if (dateTo) {
-    conditions.push("created_at <= ?");
+    conditions.push(`${columnPrefix}created_at <= ?`);
     args.push(dateTo);
   }
 
@@ -325,9 +342,7 @@ export function registerMemoryTools(
       async (params: MemorySearchInput) => {
         const activeDb = await resolveDatabase(database);
         const { clause: tagClause, params: tagParams } = tagsFilterClauses(params.tags);
-        const conditions: string[] = [
-          "m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)",
-        ];
+        const conditions: string[] = [];
         const sqlParams: Array<string | number> = [toFtsQuery(params.query)];
 
         if (params.type) {
@@ -338,12 +353,20 @@ export function registerMemoryTools(
           conditions.push("m.agent_id = ?");
           sqlParams.push(params.agent_id);
         }
+        if (tagClause) {
+          // tagClause is " AND <clauses>"; strip the prefix to compose here.
+          conditions.push(tagClause.slice(" AND ".length));
+        }
 
+        // rank (bm25) sorts best text match first; importance/recency break ties.
         const rows = activeDb
           .prepare(
             `SELECT m.* FROM memories m
-             WHERE ${conditions.join(" AND ")}${tagClause}
-             ORDER BY m.importance DESC, m.updated_at DESC
+             JOIN (
+               SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
+             ) f ON m.rowid = f.rowid
+             ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
+             ORDER BY f.rank ASC, m.importance DESC, m.updated_at DESC
              LIMIT ? OFFSET ?`
           )
           .all(
@@ -716,7 +739,7 @@ export function registerMemoryTools(
     {
       title: "Memory Usage Report",
       description:
-        "Aggregate tool usage events by tool, agent, client, version, operation type, status, or day.",
+        "Aggregate tool usage events by tool, agent, client, version, operation type, status, or day. With MEMORY_TELEMETRY off (the default) only usage-feedback events exist, so most groupings are empty; full aggregates need MEMORY_TELEMETRY=on.",
       inputSchema: MemoryUsageReportInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -804,6 +827,7 @@ export function registerMemoryTools(
         const successEvents = summaryRow.success_events ?? 0;
         const errorEvents = summaryRow.error_events ?? 0;
         const output = {
+          ...telemetryOffNote(),
           summary: {
             total_events: totalEvents,
             success_events: successEvents,
@@ -831,7 +855,7 @@ export function registerMemoryTools(
     {
       title: "Memory Adoption Report",
       description:
-        "Summarize reasoning and memory adoption behavior using telemetry plus core session tables.",
+        "Summarize reasoning and memory adoption behavior using telemetry plus core session tables. With MEMORY_TELEMETRY off (the default) only usage-feedback events and session tables have data, so funnel counts and ratios that need recall/search events require MEMORY_TELEMETRY=on.",
       inputSchema: MemoryAdoptionReportInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -874,17 +898,18 @@ export function registerMemoryTools(
           reasoning_abandoned: number | null;
         };
 
+        const joinedSessionFilter = buildSessionWhere(params, "reasoning_sessions.");
         const zeroStepRow = activeDb
           .prepare(
             `SELECT COUNT(*) as zero_step_sessions
              FROM reasoning_sessions
              LEFT JOIN reasoning_steps
                ON reasoning_steps.session_id = reasoning_sessions.id
-             WHERE ${sessionFilter.clause}
+             WHERE ${joinedSessionFilter.clause}
              GROUP BY reasoning_sessions.id
              HAVING COUNT(reasoning_steps.id) = 0`
           )
-          .all(...sessionFilter.args) as Array<{ zero_step_sessions: number }>;
+          .all(...joinedSessionFilter.args) as Array<{ zero_step_sessions: number }>;
 
         const completionEvents = activeDb
           .prepare(
@@ -1006,6 +1031,7 @@ export function registerMemoryTools(
         }
 
         const output = {
+          ...telemetryOffNote(),
           funnel: {
             reasoning_started: reasoningStarted,
             reasoning_completed: reasoningCompleted,
@@ -1037,7 +1063,7 @@ export function registerMemoryTools(
     {
       title: "Memory Agent Scorecard",
       description:
-        "Compare how different agents use memory and reasoning tools in practice.",
+        "Compare how different agents use memory and reasoning tools in practice. With MEMORY_TELEMETRY off (the default) only usage-feedback events are recorded, so per-agent activity counts require MEMORY_TELEMETRY=on.",
       inputSchema: MemoryAgentScorecardInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -1087,11 +1113,16 @@ export function registerMemoryTools(
 
         const results = rows.map((row) => {
           const agentId = row.agent_id === "unknown" ? null : row.agent_id;
-          const agentSessionFilter = buildSessionWhere({
-            agent_id: agentId,
-            date_from: params.date_from,
-            date_to: params.date_to,
-          });
+          // Qualified so the same filter works in the reasoning_steps JOIN
+          // below; the prefix is harmless in the unjoined query.
+          const agentSessionFilter = buildSessionWhere(
+            {
+              agent_id: agentId,
+              date_from: params.date_from,
+              date_to: params.date_to,
+            },
+            "reasoning_sessions."
+          );
           const agentEventFilter = buildTelemetryWhere({
             agent_id: agentId,
             date_from: params.date_from,
@@ -1209,7 +1240,7 @@ export function registerMemoryTools(
           };
         });
 
-        const output = { results };
+        const output = { ...telemetryOffNote(), results };
         return {
           content: [{ type: "text" as const, text: toLimitedJson(output) }],
           structuredContent: output,
@@ -1223,7 +1254,7 @@ export function registerMemoryTools(
     {
       title: "Record Memory Usage Feedback",
       description:
-        "Record whether a recalled memory was used, ignored, stale, or unsafe to use.",
+        "Record whether a recalled memory was used, ignored, stale, or unsafe to use. Feedback is a first-party learning signal for recall quality and is always persisted locally, regardless of the MEMORY_TELEMETRY setting.",
       inputSchema: MemoryRecordUsageFeedbackInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -1248,7 +1279,7 @@ export function registerMemoryTools(
             reason_length: params.reason?.length ?? 0,
           },
           outputShape: {
-            recorded: result.isError !== true,
+            recorded: result.structuredContent?.recorded === true,
           },
           metadata: {
             usefulness: params.usefulness,
@@ -1257,18 +1288,6 @@ export function registerMemoryTools(
         }),
       },
       async (params: MemoryRecordUsageFeedbackInput) => {
-        if (!telemetryPersistenceEnabled()) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: "Error: Telemetry persistence is disabled; memory feedback cannot be recorded.",
-              },
-            ],
-            isError: true,
-          };
-        }
-
         const activeDb = await resolveDatabase(database);
         const existing = activeDb
           .prepare(`SELECT id FROM memories WHERE id = ?`)

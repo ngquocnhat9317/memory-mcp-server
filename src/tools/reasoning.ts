@@ -35,6 +35,7 @@ import {
   newId,
   nowIso,
   parseJsonArray,
+  parseJsonObject,
   toFtsOrQuery,
   toFtsQuery,
   toLimitedJson,
@@ -218,6 +219,12 @@ interface RelatedMemoryRecord {
   importance: number;
   tags: string[];
   snippet: string;
+  /** Present only for memories persisted from a reasoning session. */
+  source?: {
+    session_id: string;
+    session_title: string;
+    created_at: string;
+  };
 }
 
 function abandonStaleSessions(database: DatabaseSync, now: string): number {
@@ -243,12 +250,15 @@ function recallRelatedMemories(
 ): RelatedMemoryRecord[] {
   if (AUTO_RECALL_LIMIT <= 0) return [];
   try {
+    // rank (bm25) sorts best text match first; importance/recency break ties.
     const rows = database
       .prepare(
-        `SELECT m.id, m.type, m.content, m.tags, m.importance
+        `SELECT m.id, m.type, m.content, m.tags, m.importance, m.metadata, m.created_at
          FROM memories m
-         WHERE m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
-         ORDER BY m.importance DESC, m.updated_at DESC
+         JOIN (
+           SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
+         ) f ON m.rowid = f.rowid
+         ORDER BY f.rank ASC, m.importance DESC, m.updated_at DESC
          LIMIT ?`
       )
       .all(toFtsOrQuery(title), AUTO_RECALL_LIMIT) as Array<{
@@ -257,14 +267,31 @@ function recallRelatedMemories(
       content: string;
       tags: string | null;
       importance: number;
+      metadata: string | null;
+      created_at: string;
     }>;
-    return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      importance: row.importance,
-      tags: parseJsonArray(row.tags),
-      snippet: compactSnippetText(row.content),
-    }));
+    return rows.map((row) => {
+      const metadata = parseJsonObject(row.metadata);
+      const sourceSessionId = metadata?.source_session_id;
+      const sourceSessionTitle = metadata?.session_title;
+      return {
+        id: row.id,
+        type: row.type,
+        importance: row.importance,
+        tags: parseJsonArray(row.tags),
+        snippet: compactSnippetText(row.content),
+        ...(typeof sourceSessionId === "string" &&
+        typeof sourceSessionTitle === "string"
+          ? {
+              source: {
+                session_id: sourceSessionId,
+                session_title: sourceSessionTitle,
+                created_at: row.created_at,
+              },
+            }
+          : {}),
+      };
+    });
   } catch {
     // Recall is best-effort; a bad FTS query must never block session creation.
     return [];
@@ -288,7 +315,7 @@ Args:
   - agent_id (string, optional): Identifier for the agent/persona running this session.
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session.
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server and ranked by text relevance. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
   - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
@@ -371,10 +398,20 @@ Examples:
             ? { auto_abandoned_sessions: autoAbandoned }
             : {}),
         };
-        const recallNote =
-          relatedMemories.length > 0
-            ? ` Found ${relatedMemories.length} related memories — review them before starting.`
-            : "";
+        let recallNote = "";
+        if (relatedMemories.length > 0) {
+          recallNote = ` Found ${relatedMemories.length} related memories — review them before starting.`;
+        } else {
+          // One-time cold-start nudge: only while the store is completely
+          // empty, so it disappears forever after the first saved memory.
+          const anyMemory = activeDb
+            .prepare(`SELECT EXISTS(SELECT 1 FROM memories) as e`)
+            .get() as { e: number };
+          if (anyMemory.e === 0) {
+            recallNote =
+              " No memories yet — when you complete this session, persist durable conclusions with save_as_memory=true so future sessions can recall them.";
+          }
+        }
         return {
           content: [
             {
@@ -1444,7 +1481,7 @@ Error Handling:
             usedMemoryFeedbackRecorded += 1;
           } else {
             usedMemoryWarnings.push(
-              `Telemetry is disabled; usage feedback for '${usedMemoryId}' was not recorded.`
+              `Usage feedback for '${usedMemoryId}' could not be recorded.`
             );
           }
         }

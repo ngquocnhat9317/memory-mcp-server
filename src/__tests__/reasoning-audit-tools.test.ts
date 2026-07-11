@@ -1095,8 +1095,8 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     assert.equal(result.isError, undefined);
     assert.equal(result.content[0]?.text, expectedGuide);
     assert.deepEqual(result.structuredContent, {
-      guide_version: "2026-07-11.v1",
-      mcp_version: "1.2.5",
+      guide_version: "2026-07-11.v3",
+      mcp_version: "1.3.0",
       path: "GUIDELINES.md",
       format: "markdown",
       content: expectedGuide,
@@ -1120,7 +1120,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     assert.equal(event.tool_name, "get_usage_guide");
     assert.equal(event.operation_type, "guidance");
     assert.equal(event.access_type, "derived");
-    assert.equal(event.guidance_version, "2026-07-11.v1");
+    assert.equal(event.guidance_version, "2026-07-11.v3");
     assert.equal(event.agent_id, "agent-guide");
     assert.equal(event.client_name, "codex");
   } finally {
@@ -1615,7 +1615,7 @@ test("memory_record_usage_feedback rejects unverifiable multi-memory recall even
   }
 });
 
-test("memory_record_usage_feedback fails clearly when telemetry persistence is disabled", async () => {
+test("usage feedback is persisted even when telemetry is disabled, while other events stay gated", async () => {
   const originalTelemetry = process.env.MEMORY_TELEMETRY;
   process.env.MEMORY_TELEMETRY = "off";
 
@@ -1625,7 +1625,9 @@ test("memory_record_usage_feedback fails clearly when telemetry persistence is d
   runMigrations(toolDb);
 
   try {
-    const { registerMemoryTools } = await import(`../tools/memory.js?telemetry-off=${Date.now()}`);
+    // Plain import: the telemetry gate reads MEMORY_TELEMETRY at call time,
+    // so no cache-busting re-import is needed to flip it.
+    const { registerMemoryTools } = await import("../tools/memory.js");
 
     const server = new McpServer({ name: "test-server", version: "1.1.5" });
     registerMemoryTools(server, toolDb);
@@ -1634,6 +1636,8 @@ test("memory_record_usage_feedback fails clearly when telemetry persistence is d
       ._registeredTools;
     const recordFeedback = registeredTools.memory_record_usage_feedback?.handler;
     assert.ok(recordFeedback, "memory_record_usage_feedback should be registered");
+    const saveMemory = registeredTools.memory_save?.handler;
+    assert.ok(saveMemory, "memory_save should be registered");
 
     toolDb.exec(`
       DELETE FROM tool_usage_events;
@@ -1657,10 +1661,47 @@ test("memory_record_usage_feedback fails clearly when telemetry persistence is d
     const result = await recordFeedback({
       memory_id: "mem_feedback",
       usefulness: "used",
-      reason: "should fail without persistence",
+      reason: "learning signal must persist without telemetry",
     });
-    assert.equal(result.isError, true);
-    assert.match(result.content[0]?.text ?? "", /telemetry.*disabled/i);
+    assert.equal(result.isError, undefined);
+    const payload = result.structuredContent as {
+      recorded: boolean;
+      memory_id: string;
+    };
+    assert.equal(payload.recorded, true);
+    assert.equal(payload.memory_id, "mem_feedback");
+
+    const feedbackEvents = toolDb
+      .prepare(
+        `SELECT operation_type, memory_id FROM tool_usage_events
+         WHERE operation_type = 'feedback'`
+      )
+      .all() as Array<{ operation_type: string; memory_id: string | null }>;
+    assert.equal(feedbackEvents.length, 1);
+    assert.equal(feedbackEvents[0].memory_id, "mem_feedback");
+
+    // Non-feedback events must stay gated: a memory_save records nothing.
+    const saved = await saveMemory({
+      content: "diagnostics stay opt-in",
+      type: "fact",
+      importance: 3,
+    });
+    assert.equal(saved.isError, undefined);
+    const nonFeedbackCount = toolDb
+      .prepare(
+        `SELECT COUNT(*) as c FROM tool_usage_events
+         WHERE operation_type != 'feedback'`
+      )
+      .get() as { c: number };
+    assert.equal(nonFeedbackCount.c, 0);
+
+    // Validation errors must still be real errors even with telemetry off.
+    const missing = await recordFeedback({
+      memory_id: "mem_does_not_exist",
+      usefulness: "used",
+    });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0]?.text ?? "", /not found/);
   } finally {
     if (originalTelemetry === undefined) {
       delete process.env.MEMORY_TELEMETRY;

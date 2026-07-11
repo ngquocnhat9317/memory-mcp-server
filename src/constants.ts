@@ -3,8 +3,16 @@ import os from "node:os";
 
 /** Max characters returned in a single tool response before truncation. */
 export const CHARACTER_LIMIT = 25000;
-export const MCP_VERSION = "1.2.5";
-export const TELEMETRY_ENABLED = process.env.MEMORY_TELEMETRY !== "off";
+export const MCP_VERSION = "1.3.0";
+/**
+ * Diagnostics-event recording is opt-in: set MEMORY_TELEMETRY=on to enable.
+ * Read at call time so tests and long-lived processes can toggle it.
+ * Usage-feedback events are a first-party learning signal and are always
+ * recorded regardless of this flag (see recordToolUsageEvent).
+ */
+export function isTelemetryEnabled(): boolean {
+  return process.env.MEMORY_TELEMETRY === "on";
+}
 
 /**
  * Hours after which an untouched in_progress reasoning session is
