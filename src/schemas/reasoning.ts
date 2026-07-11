@@ -20,9 +20,30 @@ export type ReasoningStartSessionInput = z.infer<
   typeof ReasoningStartSessionInputSchema
 >;
 
+export const ReasoningStepEntrySchema = z
+  .object({
+    thought: z
+      .string()
+      .max(4000)
+      .optional()
+      .describe("The agent's reasoning/thinking at this step."),
+    action: z
+      .string()
+      .max(2000)
+      .optional()
+      .describe("The action taken at this step, if any (e.g. a tool call description)."),
+    observation: z
+      .string()
+      .max(4000)
+      .optional()
+      .describe("The result/observation from the action, if any."),
+  })
+  .strict();
+export type ReasoningStepEntry = z.infer<typeof ReasoningStepEntrySchema>;
+
 // NOTE: kept as a plain ZodObject (no .refine()) so `.shape` stays available
-// for registerTool's inputSchema. The "at least one field" rule is enforced
-// in the tool handler instead.
+// for registerTool's inputSchema. The "at least one field" and "single vs
+// batch" rules are enforced in the tool handler instead.
 export const ReasoningAddStepInputSchema = z
   .object({
     session_id: z
@@ -44,6 +65,14 @@ export const ReasoningAddStepInputSchema = z
       .max(4000)
       .optional()
       .describe("The result/observation from the action, if any."),
+    steps: z
+      .array(ReasoningStepEntrySchema)
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        "Batch mode: log several steps in one call (each entry needs at least one of thought/action/observation). Use INSTEAD of the top-level thought/action/observation fields, e.g. to record the trace of work you just finished without one call per step."
+      ),
   })
   .strict();
 export type ReasoningAddStepInput = z.infer<typeof ReasoningAddStepInputSchema>;

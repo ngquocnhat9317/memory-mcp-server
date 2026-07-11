@@ -398,16 +398,17 @@ Examples:
     "reasoning_add_step",
     {
       title: "Add Reasoning Step",
-      description: `Append one step (thought / action / observation) to an existing reasoning session. Steps are numbered automatically in the order added. Call this repeatedly as the agent works through a task.
+      description: `Append one step (thought / action / observation) — or a batch of steps — to an existing reasoning session. Steps are numbered automatically in the order added.
 
 Args:
   - session_id (string, required): Id from reasoning_start_session.
   - thought (string, optional): The reasoning/thinking at this step.
   - action (string, optional): The action taken, if any.
   - observation (string, optional): The result observed, if any.
-  (At least one of thought/action/observation is required.)
+  - steps (array, optional): Batch mode — log up to 20 steps in one call, each {thought?, action?, observation?} with at least one field. Use INSTEAD of the top-level fields (not together), e.g. to record several steps of finished work at once.
+  (Either steps, or at least one of thought/action/observation, is required.)
 
-Returns: JSON with the new step's id and step_number.
+Returns: single mode — JSON with the new step's id and step_number; batch mode — JSON with steps: [{step_id, step_number}, ...] in insertion order.
 
 Error Handling:
   - Returns an error if session_id does not exist (call reasoning_start_session first, or reasoning_list_sessions to find the right id).
@@ -442,6 +443,8 @@ Error Handling:
                 ? result.structuredContent.step_id
                 : null,
             inputShape: {
+              batch: params.steps !== undefined,
+              batch_size: params.steps?.length ?? null,
               thought_present: params.thought !== undefined,
               action_present: params.action !== undefined,
               observation_present: params.observation !== undefined,
@@ -451,6 +454,11 @@ Error Handling:
             },
             outputShape: {
               step_number: result.structuredContent?.step_number ?? null,
+              steps_added: Array.isArray(result.structuredContent?.steps)
+                ? result.structuredContent.steps.length
+                : result.structuredContent?.step_number !== undefined
+                  ? 1
+                  : 0,
             },
           };
         },
@@ -458,16 +466,51 @@ Error Handling:
       async (params: ReasoningAddStepInput) => {
       try {
         const activeDb = await resolveDatabase(database);
-        if (
-          params.thought === undefined &&
-          params.action === undefined &&
-          params.observation === undefined
-        ) {
+        const hasSingleFields =
+          params.thought !== undefined ||
+          params.action !== undefined ||
+          params.observation !== undefined;
+        if (params.steps !== undefined && hasSingleFields) {
           return {
             content: [
               {
                 type: "text" as const,
-                text: "Error: At least one of thought, action, or observation must be provided.",
+                text: "Error: Provide either steps (batch mode) or top-level thought/action/observation (single mode), not both.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        if (params.steps === undefined && !hasSingleFields) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: Either steps (batch mode), or at least one of thought, action, or observation, must be provided.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const entries = params.steps ?? [
+          {
+            thought: params.thought,
+            action: params.action,
+            observation: params.observation,
+          },
+        ];
+        const invalidIndex = entries.findIndex(
+          (entry) =>
+            entry.thought === undefined &&
+            entry.action === undefined &&
+            entry.observation === undefined
+        );
+        if (invalidIndex !== -1) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: steps[${invalidIndex}] must include at least one of thought, action, or observation.`,
               },
             ],
             isError: true,
@@ -499,7 +542,7 @@ Error Handling:
           };
         }
 
-        const output = runInTransaction(activeDb, () => {
+        const insertedSteps = runInTransaction(activeDb, () => {
           const lockedSession = activeDb
             .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
             .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
@@ -514,33 +557,44 @@ Error Handling:
             );
           }
 
-          const nextStepNumber = getNextStepNumber(activeDb, params.session_id);
-          const id = newId("step");
+          const firstStepNumber = getNextStepNumber(activeDb, params.session_id);
           const ts = nowIso();
-          activeDb
-            .prepare(
-              `INSERT INTO reasoning_steps (id, session_id, step_number, thought, action, observation, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
-            )
-            .run(
+          const insertStep = activeDb.prepare(
+            `INSERT INTO reasoning_steps (id, session_id, step_number, thought, action, observation, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          );
+          const created = entries.map((entry, index) => {
+            const id = newId("step");
+            insertStep.run(
               id,
               params.session_id,
-              nextStepNumber,
-              params.thought ?? null,
-              params.action ?? null,
-              params.observation ?? null,
+              firstStepNumber + index,
+              entry.thought ?? null,
+              entry.action ?? null,
+              entry.observation ?? null,
               ts
             );
+            return { step_id: id, step_number: firstStepNumber + index };
+          });
           activeDb
             .prepare(`UPDATE reasoning_sessions SET updated_at = ? WHERE id = ?`)
             .run(ts, params.session_id);
 
-          return {
-            step_id: id,
-            session_id: params.session_id,
-            step_number: nextStepNumber,
-          };
+          return created;
         });
+
+        const output =
+          params.steps !== undefined
+            ? {
+                session_id: params.session_id,
+                steps: insertedSteps,
+                step_count: insertedSteps.length,
+              }
+            : {
+                step_id: insertedSteps[0].step_id,
+                session_id: params.session_id,
+                step_number: insertedSteps[0].step_number,
+              };
         return {
           content: [{ type: "text" as const, text: toLimitedJson(output) }],
           structuredContent: output,

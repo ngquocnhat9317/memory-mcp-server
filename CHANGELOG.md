@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.5 (2026-07-11) — not yet published to npm
+
+Theme: cut logging friction and make the docs tell the new story.
+
+### Added
+
+- **Batch steps**: `reasoning_add_step` accepts `steps: [{thought?, action?, observation?}, ...]` (max 20) to log several steps in one call — ideal for recording a stretch of finished work instead of pausing after every step. Insertion is atomic (all steps or none) and numbering stays sequential. Single-step calls and their response shape are unchanged.
+- `keywords` in package.json and a registry submission playbook under `docs/growth/registry-submissions.md`.
+
+### Changed
+
+- **GUIDELINES.md rewritten around the task lifecycle** (`2026-07-11.v1`): task start (act on `related_memories`, close forgotten sessions), during (log decisions, batch mode, mark pivotal steps), task end (`used_memory_ids`, opt-in memory save). All 20 tools are now documented in the guide, including the audit and report layers.
+- **README rewritten as a user-facing landing page**: npx quick-install for Claude Code / Claude Desktop / Codex / Cursor, a "why this one" comparison, configuration table, and an updated AGENTS.md snippet matching the v1.2.x lifecycle.
+
 ## 1.2.0 (2026-07-10)
 
 Theme: close the memory value loop — recall becomes automatic, cleanup becomes automatic, and usefulness becomes measurable.
