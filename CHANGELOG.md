@@ -1,6 +1,27 @@
 # Changelog
 
-## 1.2.5 (2026-07-11) — not yet published to npm
+## 1.3.0 (2026-07-11)
+
+Theme: recall that stays right as the store grows — relevance ranking, provenance, and an always-on learning signal.
+
+### Added
+
+- **Provenance on auto-recall**: memories that were persisted from a reasoning session now carry a `source` field (`{session_id, session_title, created_at}`) in `related_memories`, turning a recalled sentence into a conclusion with an origin — pass `source.session_id` to `reasoning_get_trace` to replay how it was reached. Manually saved memories are unchanged (no `source` field).
+- **Cold-start nudge**: while the memory store is completely empty, `reasoning_start_session` adds one sentence to its text response suggesting `save_as_memory=true` at completion. It disappears forever after the first memory is saved — zero noise for existing stores.
+- README "What it feels like": a two-scene text walkthrough of save-then-auto-recall with provenance. (An animated GIF/asciinema recording of the same scenario is planned but deferred — it needs a human-recorded terminal session.)
+
+### Changed
+
+- **Recall and search are now relevance-ranked** (BM25): both auto-recall (`related_memories` on `reasoning_start_session`) and `memory_search` order results by FTS5 text-match quality first, with `importance` and `updated_at` as tie-breaks — previously ordering was importance-first, which let a high-importance but off-topic memory outrank the best match as the store grows. No response shape change, no new configuration; all existing filters (`type`, `agent_id`, `tags`) behave the same.
+- **Usage feedback is now always recorded** (learning signal ≠ diagnostics): `used_memory_ids` on `reasoning_complete_session` and `memory_record_usage_feedback` persist locally regardless of `MEMORY_TELEMETRY`. Feedback is the first-party signal that measures whether recall is actually helping, so it no longer shares a gate with opt-in diagnostics. Only *successful* feedback is exempt — failed feedback attempts (error codes, latency) are diagnostics and stay gated. Everything else (searches, saves, recalls, reports data) stays opt-in via `MEMORY_TELEMETRY=on`. `memory_record_usage_feedback` no longer returns `recorded: false` when telemetry is off. Nothing leaves your machine in either mode.
+- **Report outputs are self-describing about telemetry**: when `MEMORY_TELEMETRY` is off, `memory_usage_report`, `memory_adoption_report`, and `memory_agent_scorecard` include a `telemetry_note` field in their JSON output so empty funnels cannot be mistaken for real zeros.
+- `GUIDELINES.md` bumped to `2026-07-11.v3`: feedback reporting described as always-on; report tools clarified to need `MEMORY_TELEMETRY=on` for full funnels.
+
+### Fixed
+
+- `memory_adoption_report` and `memory_agent_scorecard` crashed with "ambiguous column name: created_at" when called with `date_from`/`date_to` while session data existed — the session-table filter is now column-qualified in the queries that join `reasoning_steps`. (Pre-existing since 1.2.0, surfaced by the new coverage suite.)
+
+## 1.2.5 (2026-07-11)
 
 Theme: cut logging friction and make the docs tell the new story.
 
@@ -11,8 +32,10 @@ Theme: cut logging friction and make the docs tell the new story.
 
 ### Changed
 
+- **Telemetry is now opt-in**: `MEMORY_TELEMETRY` defaults to **off**; set `MEMORY_TELEMETRY=on` to record usage events locally. The report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`) only have data when it is on, and usage feedback is only persisted when it is on. Core features — auto-recall, stale-session cleanup, batch steps, memory CRUD — work fully without it. Rationale: telemetry serves operators who run multiple agent personas and study their behavior; for single-agent users it was overhead with no benefit. If you were relying on the previous default, add `MEMORY_TELEMETRY=on` to your MCP config env.
+- **`memory_record_usage_feedback` degrades softly when telemetry is off**: instead of a hard error, it validates inputs normally and returns `{recorded: false, ...}` with a warning explaining how to enable telemetry. Validation failures (unknown memory id, unverifiable event) still return real errors. The telemetry check now runs after input validation.
 - **GUIDELINES.md rewritten around the task lifecycle** (`2026-07-11.v1`): task start (act on `related_memories`, close forgotten sessions), during (log decisions, batch mode, mark pivotal steps), task end (`used_memory_ids`, opt-in memory save). All 20 tools are now documented in the guide, including the audit and report layers.
-- **README rewritten as a user-facing landing page**: npx quick-install for Claude Code / Claude Desktop / Codex / Cursor, a "why this one" comparison, configuration table, and an updated AGENTS.md snippet matching the v1.2.x lifecycle.
+- **README rewritten as a user-facing landing page**: npx quick-install for Claude Code / Claude Desktop / Codex / Cursor / Antigravity, a "why this one" comparison, configuration table, and an updated AGENTS.md snippet matching the v1.2.x lifecycle. Telemetry is presented as an optional operator feature rather than a headline.
 
 ## 1.2.0 (2026-07-10)
 
