@@ -71,12 +71,14 @@ function insertMemory(
   );
 }
 
-test("auto-recall ranks by text relevance before importance", async () => {
+test("auto-recall filters one-word matches below the quality floor", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("wave3-recall-relevance");
 
   try {
     // Deliberately separated fixture: comparable lengths, clearly different
     // term overlap with the session title, importance inverted vs relevance.
+    // mem_noise matches only 'payment' (1 of 5 significant terms) and must
+    // be dropped by the min-match floor despite importance 5 (AC-8.1).
     insertMemory(toolDb, {
       id: "mem_noise",
       content: "payment provider rotation schedule for the operations team",
@@ -95,9 +97,10 @@ test("auto-recall ranks by text relevance before importance", async () => {
     const payload = started.structuredContent as {
       related_memories: Array<{ id: string; importance: number }>;
     };
-    assert.equal(payload.related_memories.length, 2);
-    assert.equal(payload.related_memories[0].id, "mem_match");
-    assert.equal(payload.related_memories[1].id, "mem_noise");
+    assert.deepEqual(
+      payload.related_memories.map((row) => row.id),
+      ["mem_match"]
+    );
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });

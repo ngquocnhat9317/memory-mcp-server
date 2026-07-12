@@ -40,5 +40,15 @@ export const DB_PATH =
   process.env.MEMORY_DB_PATH ??
   path.join(os.homedir(), ".memory-mcp-server", "memory.db");
 
+/**
+ * Workspace identity for memory scoping. Claude Code/Codex launch the MCP
+ * server inside the project directory, so cwd identifies the project;
+ * MEMORY_WORKSPACE pins it explicitly when a client launches elsewhere.
+ * Read at call time (same pattern as isTelemetryEnabled) for testability.
+ */
+export function getWorkspace(): string {
+  return process.env.MEMORY_WORKSPACE ?? process.cwd();
+}
+
 export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 200;

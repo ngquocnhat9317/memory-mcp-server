@@ -47,6 +47,7 @@ test("reasoning_step_marks enforces one row per step and mark type", () => {
         "0002_reasoning_step_marks",
         "0003_reasoning_steps_fts",
         "0004_tool_usage_events",
+        "0005_memory_workspace",
       ]
     );
 
@@ -1095,7 +1096,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     assert.equal(result.isError, undefined);
     assert.equal(result.content[0]?.text, expectedGuide);
     assert.deepEqual(result.structuredContent, {
-      guide_version: "2026-07-11.v4",
+      guide_version: "2026-07-12.v5",
       mcp_version: "1.3.0",
       path: "GUIDELINES.md",
       format: "markdown",
@@ -1120,7 +1121,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     assert.equal(event.tool_name, "get_usage_guide");
     assert.equal(event.operation_type, "guidance");
     assert.equal(event.access_type, "derived");
-    assert.equal(event.guidance_version, "2026-07-11.v4");
+    assert.equal(event.guidance_version, "2026-07-12.v5");
     assert.equal(event.agent_id, "agent-guide");
     assert.equal(event.client_name, "codex");
   } finally {
