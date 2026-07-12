@@ -1,184 +1,185 @@
 # memory-mcp-server
 
-MCP server for agents that need:
+[![npm version](https://img.shields.io/npm/v/%40nhatnguyen9317%2Fmemory-mcp-server)](https://www.npmjs.com/package/@nhatnguyen9317/memory-mcp-server)
+[![CI](https://github.com/ngquocnhat9317/memory-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/ngquocnhat9317/memory-mcp-server/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node >= 22.5](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)](#requirements)
 
-- durable memory across tasks
-- per-task reasoning traces
-- lightweight audit/review tools over those traces
+**Memory that runs itself** — your agent remembers past work without being
+told, and you maintain nothing.
 
-This server runs over stdio, stores data in SQLite, and is meant to be installed into an MCP client such as Claude Code, Codex, or another MCP-compatible agent.
+Long-term memory and reasoning traces for AI agents.
 
-## What This MCP Is For
+- **Durable memory** across tasks and sessions (SQLite + full-text search)
+- **Reasoning traces**: per-task step-by-step records you can search and audit
+- **Auto-recall**: starting a session automatically surfaces related memories
+- **Self-cleaning**: stale sessions are auto-abandoned instead of piling up
 
-Use this MCP when you want an agent to:
+Runs over stdio. Local only, no network service, no native addon build.
 
-- save stable facts, decisions, and preferences for later reuse
-- keep a reasoning session for one concrete task
-- search or review prior reasoning traces
-- measure memory/reasoning usage through telemetry reports
+## What it feels like
 
-High-level split:
+**Session 1 — Tuesday.** Your agent debugs a flaky checkout test and closes its
+reasoning session:
 
-- `memory_*` tools: durable recall
-- `reasoning_*` tools: live task trace and audit retrieval
-- `get_usage_guide`: runtime usage guide an agent can call after connection
-
-## Requirements
-
-- Node.js `>= 22.5.0`
-- support for Node's built-in `node:sqlite`
-
-No native addon build is required.
-
-> Note: `node:sqlite` is still an experimental Node.js API on Node 22. The server
-> works reliably, but Node prints an `ExperimentalWarning` to stderr on startup,
-> and the API surface may change between Node releases.
-
-## Install
-
-```bash
-npm install
-npm run build
+```
+reasoning_complete_session
+  conclusion: "checkout retry logic must reopen the connection before retrying"
+  save_as_memory: true
+→ memory mem_a1b2… saved
 ```
 
-Built entrypoint:
+**Session 2 — Friday, fresh context, nobody mentions Tuesday.** The agent starts
+a related task:
 
-- `dist/index.js`
-
-## Run
-
-```bash
-npm start
+```
+reasoning_start_session  title: "checkout intermittently times out under load"
+→ related_memories: [
+    {
+      snippet: "checkout retry logic must reopen the connection before retrying",
+      source: { session_title: "diagnose flaky checkout retry logic",
+                session_id: "sess_9f3c…", created_at: "…Tue…" }
+    }
+  ]
 ```
 
-or:
+No one asked it to search. The Tuesday conclusion surfaces on its own, with its
+origin attached — and `reasoning_get_trace(source.session_id)` replays exactly
+how it was reached.
+
+## Why this one?
+
+Most memory servers store what you save and hope the agent remembers to search.
+In practice agents don't: they write memories nobody ever reads. This server
+makes the right behavior the default behavior:
+
+| | typical memory MCP | this server |
+| --- | --- | --- |
+| Recall | agent must remember to search | server auto-recalls related memories at session start |
+| Reasoning traces | — | first-class sessions with steps, marks, outlines |
+| Stale state | grows forever | stale sessions auto-abandoned (configurable TTL) |
+
+For teams running **multiple agent personas**, there is also an opt-in telemetry
+layer (`MEMORY_TELEMETRY=on`) with usage reports, an adoption funnel, and
+per-agent scorecards to compare how each persona actually uses memory. If you
+run a single agent for yourself, you can ignore it — everything above works
+without it.
+
+## Quick Install
+
+### Claude Code
 
 ```bash
-node dist/index.js
+claude mcp add memory -- npx -y @nhatnguyen9317/memory-mcp-server
 ```
 
-The server runs over stdio and logs the active DB path to stderr on startup.
-
-## Practical Setup
-
-If you are a real user wiring this into Claude Code, Codex, Antigravity, or another MCP client, the normal setup is:
-
-1. Build this repo:
-
-```bash
-npm install
-npm run build
-```
-
-2. Register it in your MCP client as a stdio server:
-
-- command: `node`
-- args: `["/absolute/path/to/memory-mcp-server/dist/index.js"]`
-
-3. Optionally set `MEMORY_DB_PATH` if you do not want the default database location.
-
-Default DB path:
-
-- `~/.memory-mcp-server/memory.db`
-
-4. Restart the MCP client.
-
-5. Verify the connection with a cheap read-only tool such as:
-
-- `get_usage_guide`
-- `memory_list`
-
-### Example MCP Config
+### Claude Desktop / Cursor / Antigravity (JSON config)
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "node",
-      "args": ["/absolute/path/to/memory-mcp-server/dist/index.js"],
-      "env": {
-        "MEMORY_DB_PATH": "/absolute/path/to/memory.db"
-      }
+      "command": "npx",
+      "args": ["-y", "@nhatnguyen9317/memory-mcp-server"]
     }
   }
 }
 ```
 
-### Shared vs Project-Scoped Memory
+Optionally pin the database location with `"env": {"MEMORY_DB_PATH": "/path/to/memory.db"}`
+(default: `~/.memory-mcp-server/memory.db`).
 
-Shared memory across many repos:
+### Codex CLI (TOML config)
 
-```json
-{
-  "env": {
-    "MEMORY_DB_PATH": "/Users/you/.memory-mcp-server/shared-memory.db"
-  }
-}
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.memory]
+enabled = true
+command = "npx"
+args = ["-y", "@nhatnguyen9317/memory-mcp-server"]
 ```
 
-Project-scoped memory:
+Verify the connection by calling a cheap read-only tool such as `get_usage_guide`
+or `memory_list`.
 
-```json
-{
-  "env": {
-    "MEMORY_DB_PATH": "/absolute/path/to/your-project/.memory/project-memory.db"
-  }
-}
-```
+## Requirements
 
-Practical recommendation:
+- Node.js `>= 22.5.0` (for the built-in `node:sqlite` — no native addon build)
 
-- use shared memory if you want one agent persona to accumulate knowledge across projects
-- use project-scoped memory if you want isolation per repository or customer
+> Note: `node:sqlite` is still an experimental Node.js API on Node 22. The server
+> works reliably, but Node prints an `ExperimentalWarning` to stderr on startup,
+> and the API surface may change between Node releases.
 
-### How An Agent Learns To Use This MCP
+## How it works
 
-The human installer reads this `README`.
+1. **Task start** — the agent calls `reasoning_start_session`. The server
+   full-text-searches the title against saved memories and returns
+   `related_memories` in the response — best text match first, current
+   workspace preferred, weak one-word matches filtered out — warns about
+   still-open sessions, and auto-abandons stale ones
+   (`MEMORY_SESSION_TTL_HOURS`, default 24).
+2. **During the task** — the agent logs decisions and observations with
+   `reasoning_add_step` (single, or up to 20 steps per call in batch mode),
+   and can mark pivotal steps for later audit.
+3. **Task end** — `reasoning_complete_session` records the conclusion,
+   optionally saves it as durable memory, and accepts `used_memory_ids` so the
+   server learns which recalled memories actually helped. This usage feedback
+   is a local learning signal and is always recorded, regardless of the
+   telemetry setting.
+4. **Optional, for multi-agent operators** — with `MEMORY_TELEMETRY=on`,
+   `memory_adoption_report` shows the funnel (sessions → completions → saves →
+   recalls → reuse) with risk flags, and `memory_agent_scorecard` compares
+   agent personas' habits and suggests corrections.
 
-The runtime agent usually does not.
+Agents learn the rules at runtime by calling `get_usage_guide`, which returns
+the versioned [GUIDELINES.md](./GUIDELINES.md).
 
-That means:
+## Configuration
 
-- `README.md` is for the person installing the MCP
-- `AGENTS.md` in this repo is for agents working inside this repo
-- an agent working in some other repo will usually only see:
-  - tool names
-  - tool descriptions
-  - schemas
-  - any runtime tool it can call, especially `get_usage_guide`
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `MEMORY_DB_PATH` | `~/.memory-mcp-server/memory.db` | SQLite database location |
+| `MEMORY_SESSION_TTL_HOURS` | `24` | Auto-abandon in_progress sessions older than this (`0` disables) |
+| `MEMORY_AUTO_RECALL_LIMIT` | `3` | Max related memories returned at session start (`0` disables) |
+| `MEMORY_WORKSPACE` | current working directory | Workspace identity stamped on saved memories and used to prefer same-workspace results at recall time. The default works out of the box for clients that launch the server inside the project (Claude Code, Codex); set explicitly if yours doesn't |
+| `MEMORY_TELEMETRY` | `off` | Set `on` to record diagnostics events locally (searches, saves, recalls, latency) — required for full data in the report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`). Usage feedback (`used_memory_ids`, `memory_record_usage_feedback`) is a learning signal, not diagnostics: it is always recorded locally, with this flag on or off |
 
-If you want a newly connected agent to use this MCP correctly, the most reliable pattern is:
+### Shared vs project-scoped memory
 
-1. install the MCP
-2. add a short instruction snippet to your own repo's `AGENTS.md` or client prompt
-3. tell the agent to call `get_usage_guide` before using memory/reasoning tools the first time
+- **Shared** (default path): one agent persona accumulates knowledge across all
+  projects. Since v1.3.0 the shared store is workspace-aware by default:
+  memories are stamped with the workspace they were saved from, and recall
+  softly prefers the current workspace — cross-project memories still surface
+  when they match strongly (that's the point of a shared store), but they no
+  longer crowd out local ones.
+- **Project-scoped**: point `MEMORY_DB_PATH` at a file inside the project
+  (e.g. `.memory/project-memory.db`) for hard isolation per repository or
+  customer.
 
-## Suggested AGENTS.md Snippet
+## Teaching your agent to use it
 
-If you want your agent to use this MCP well, you can paste something like this into your own repo's `AGENTS.md`:
+The runtime agent never reads this README — it only sees tool names, schemas,
+and whatever it can call. The reliable pattern:
+
+1. Install the MCP (above).
+2. Paste a short snippet into your own repo's `AGENTS.md` / client prompt:
 
 ```md
 ## Memory MCP
 
 When the `memory` MCP server is available:
 
-- On first use, call `get_usage_guide` to load the current usage rules.
-- Use `memory_*` tools for durable facts, decisions, and reusable context.
-- Use `reasoning_*` tools for multi-step task traces, debugging, or planning.
-- Do not store secrets, tokens, or raw sensitive data in memory.
-- Prefer `memory_search` for targeted recall and `memory_list` only for browsing.
-- Start a `reasoning_start_session` before substantial multi-step investigation, then close it with `reasoning_complete_session`.
+- On first use, call `get_usage_guide` and follow it.
+- Non-trivial task? `reasoning_start_session` first — review the
+  `related_memories` it returns before working; if one carries a `source`,
+  you can replay its origin with `reasoning_get_trace`.
+- Log meaningful steps with `reasoning_add_step` (batch mode `steps: [...]`
+  is fine for recording finished work).
+- Always close with `reasoning_complete_session`; report helpful memories via
+  `used_memory_ids`; pass `save_as_memory=true` for durable conclusions.
+- Never store secrets, tokens, or raw sensitive data.
 ```
-
-Keep that snippet in the repo where the agent actually works. Do not rely on the agent reading this MCP repo.
-
-## Do I Need `AGENTS.md` or `CLAUDE.md` In This Repo?
-
-Usually no.
-
-- You do not need to edit this repo's `AGENTS.md` just to install the MCP into your own agent.
-- You do not need a `CLAUDE.md` here unless you want Claude-specific rules for contributors working inside this MCP repo.
-- The useful place for runtime instructions is the user's own repo or client prompt, not this MCP repo.
 
 ## Tool Surface
 
@@ -193,77 +194,52 @@ Usually no.
 | `memory_update` | Update an existing memory |
 | `memory_delete` | Delete a memory |
 | `memory_usage_report` | Aggregate tool usage telemetry |
-| `memory_adoption_report` | Summarize adoption behavior across memory and reasoning |
+| `memory_adoption_report` | Adoption funnel + risk flags |
 | `memory_agent_scorecard` | Compare agent usage patterns |
 | `memory_record_usage_feedback` | Record whether recalled memory was useful |
-| `get_usage_guide` | Return the runtime usage guide for this MCP |
+| `get_usage_guide` | Return the runtime usage guide |
 
 ### Reasoning tools
 
 | Tool | Purpose |
 | --- | --- |
-| `reasoning_start_session` | Open a reasoning session |
-| `reasoning_add_step` | Append a thought, action, or observation |
+| `reasoning_start_session` | Open a session (auto-recall + stale cleanup) |
+| `reasoning_add_step` | Append one step or a batch of steps |
 | `reasoning_get_trace` | Return the full ordered trace |
-| `reasoning_list_sessions` | List sessions with grouped step counts |
-| `reasoning_mark_step` | Add or update an audit mark on a step |
+| `reasoning_list_sessions` | List sessions with step counts |
+| `reasoning_mark_step` | Add/update an audit mark on a step |
 | `reasoning_search_steps` | Search reasoning steps |
-| `reasoning_list_milestones` | List marked steps without loading a full trace |
-| `reasoning_get_session_outline` | Return marked steps or deterministic fallback outline |
-| `reasoning_complete_session` | Close a session and optionally save its conclusion as memory |
+| `reasoning_list_milestones` | List marked steps across sessions |
+| `reasoning_get_session_outline` | Marked steps or deterministic outline |
+| `reasoning_complete_session` | Close a session; optional memory save + usage feedback |
 
 ## Storage Model
 
-Main tables:
+Tables: `memories`, `reasoning_sessions`, `reasoning_steps`,
+`reasoning_step_marks`, `tool_usage_events`, `schema_migrations` — plus FTS5
+indexes `memories_fts` and `reasoning_steps_fts`.
 
-- `memories`
-- `reasoning_sessions`
-- `reasoning_steps`
-- `reasoning_step_marks`
-- `tool_usage_events`
-- `schema_migrations`
-
-FTS tables:
-
-- `memories_fts`
-- `reasoning_steps_fts`
-
-## Migrations
-
-Schema is managed in `src/migrations/`.
-
-Migrations run automatically at server startup. There is currently no separate manual migration CLI command in this repo.
-
-If you need migrations applied, start the server normally:
-
-```bash
-npm start
-```
-
-or:
-
-```bash
-node dist/index.js
-```
+Migrations run automatically at server startup; upgrading the package never
+requires manual schema work.
 
 ## Development
 
 ```bash
-npm run dev
-npm run build
-npm run test
-npm run clean
+npm install
+npm run build   # tsc -> dist/
+npm test        # build + node --test
+npm run dev     # tsx watch src/index.ts
 ```
-
-## Implementation Notes
 
 - `src/db.ts` owns DB open and migration bootstrap
 - `src/tools/memory.ts` owns memory tool handlers
 - `src/tools/reasoning.ts` owns reasoning and audit tool handlers
 - `src/tools/usage-guide.ts` owns `get_usage_guide`
 
+See [CHANGELOG.md](./CHANGELOG.md) for release history.
+
 ## Notes
 
-- `node:sqlite` is still experimental in Node and may print an `ExperimentalWarning`
-- this is a local stdio MCP server, not a network service
+- Local stdio MCP server, not a network service
 - `agent_id` is a filtering aid, not a security boundary
+- License: MIT

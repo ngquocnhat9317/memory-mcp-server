@@ -29,14 +29,15 @@ import type {
   ReasoningSessionRow,
   ReasoningStepRecord,
 } from "../types.js";
-import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS } from "../constants.js";
+import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS, getWorkspace } from "../constants.js";
 import {
   handleToolError,
   newId,
   nowIso,
   parseJsonArray,
-  toFtsOrQuery,
+  parseJsonObject,
   toFtsQuery,
+  toRecallTerms,
   toLimitedJson,
 } from "../utils.js";
 import { recordToolUsageEvent, withTelemetry } from "./telemetry.js";
@@ -218,6 +219,12 @@ interface RelatedMemoryRecord {
   importance: number;
   tags: string[];
   snippet: string;
+  /** Present only for memories persisted from a reasoning session. */
+  source?: {
+    session_id: string;
+    session_title: string;
+    created_at: string;
+  };
 }
 
 function abandonStaleSessions(database: DatabaseSync, now: string): number {
@@ -237,34 +244,108 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
   return Number(result.changes);
 }
 
+/** Candidate pool fetched by BM25 before the floor/re-rank pass. */
+const RECALL_CANDIDATE_POOL = 50;
+
 function recallRelatedMemories(
   database: DatabaseSync,
   title: string
 ): RelatedMemoryRecord[] {
   if (AUTO_RECALL_LIMIT <= 0) return [];
   try {
-    const rows = database
+    const terms = toRecallTerms(title);
+    if (terms.length === 0) return [];
+
+    const candidates = database
       .prepare(
-        `SELECT m.id, m.type, m.content, m.tags, m.importance
+        `SELECT m.rowid AS row_id, m.id, m.type, m.content, m.tags,
+                m.importance, m.metadata, m.created_at, m.updated_at,
+                f.rank AS fts_rank,
+                CASE
+                  WHEN m.workspace = ?     THEN 2
+                  WHEN m.workspace IS NULL THEN 1
+                  ELSE 0
+                END AS workspace_priority
          FROM memories m
-         WHERE m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
-         ORDER BY m.importance DESC, m.updated_at DESC
+         JOIN (
+           SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
+         ) f ON m.rowid = f.rowid
+         ORDER BY f.rank ASC
          LIMIT ?`
       )
-      .all(toFtsOrQuery(title), AUTO_RECALL_LIMIT) as Array<{
+      .all(getWorkspace(), terms.join(" OR "), RECALL_CANDIDATE_POOL) as Array<{
+      row_id: number;
       id: string;
       type: string;
       content: string;
       tags: string | null;
       importance: number;
+      metadata: string | null;
+      created_at: string;
+      updated_at: string;
+      fts_rank: number;
+      workspace_priority: number;
     }>;
-    return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      importance: row.importance,
-      tags: parseJsonArray(row.tags),
-      snippet: compactSnippetText(row.content),
+    if (candidates.length === 0) return [];
+
+    // Count how many title terms each candidate matches (one cheap FTS
+    // query per term, capped at 8 by toRecallTerms).
+    const matchCounts = new Map<number, number>();
+    for (const term of terms) {
+      const rowIds = database
+        .prepare(`SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?`)
+        .all(term) as Array<{ rowid: number }>;
+      for (const row of rowIds) {
+        matchCounts.set(row.rowid, (matchCounts.get(row.rowid) ?? 0) + 1);
+      }
+    }
+    const scored = candidates.map((candidate) => ({
+      ...candidate,
+      matched: matchCounts.get(candidate.row_id) ?? 1,
     }));
+
+    // Quality floor: multi-term titles require at least two matched terms.
+    // When nothing clears it, fall back to the single best-ranked match
+    // (serendipity lifeline) instead of padding every slot with junk.
+    const required = terms.length >= 3 ? 2 : 1;
+    let pool = scored.filter((candidate) => candidate.matched >= required);
+    let limit = AUTO_RECALL_LIMIT;
+    if (pool.length === 0) {
+      pool = scored;
+      limit = Math.min(1, AUTO_RECALL_LIMIT);
+    }
+
+    pool.sort(
+      (a, b) =>
+        b.matched - a.matched ||
+        b.workspace_priority - a.workspace_priority ||
+        a.fts_rank - b.fts_rank ||
+        b.importance - a.importance ||
+        (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0)
+    );
+
+    return pool.slice(0, limit).map((row) => {
+      const metadata = parseJsonObject(row.metadata);
+      const sourceSessionId = metadata?.source_session_id;
+      const sourceSessionTitle = metadata?.session_title;
+      return {
+        id: row.id,
+        type: row.type,
+        importance: row.importance,
+        tags: parseJsonArray(row.tags),
+        snippet: compactSnippetText(row.content),
+        ...(typeof sourceSessionId === "string" &&
+        typeof sourceSessionTitle === "string"
+          ? {
+              source: {
+                session_id: sourceSessionId,
+                session_title: sourceSessionTitle,
+                created_at: row.created_at,
+              },
+            }
+          : {}),
+      };
+    });
   } catch {
     // Recall is best-effort; a bad FTS query must never block session creation.
     return [];
@@ -288,7 +369,7 @@ Args:
   - agent_id (string, optional): Identifier for the agent/persona running this session.
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session.
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by text relevance, softly preferring the current workspace; weak one-word matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
   - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
@@ -371,10 +452,20 @@ Examples:
             ? { auto_abandoned_sessions: autoAbandoned }
             : {}),
         };
-        const recallNote =
-          relatedMemories.length > 0
-            ? ` Found ${relatedMemories.length} related memories — review them before starting.`
-            : "";
+        let recallNote = "";
+        if (relatedMemories.length > 0) {
+          recallNote = ` Found ${relatedMemories.length} related memories — review them before starting.`;
+        } else {
+          // One-time cold-start nudge: only while the store is completely
+          // empty, so it disappears forever after the first saved memory.
+          const anyMemory = activeDb
+            .prepare(`SELECT EXISTS(SELECT 1 FROM memories) as e`)
+            .get() as { e: number };
+          if (anyMemory.e === 0) {
+            recallNote =
+              " No memories yet — when you complete this session, persist durable conclusions with save_as_memory=true so future sessions can recall them.";
+          }
+        }
         return {
           content: [
             {
@@ -398,16 +489,17 @@ Examples:
     "reasoning_add_step",
     {
       title: "Add Reasoning Step",
-      description: `Append one step (thought / action / observation) to an existing reasoning session. Steps are numbered automatically in the order added. Call this repeatedly as the agent works through a task.
+      description: `Append one step (thought / action / observation) — or a batch of steps — to an existing reasoning session. Steps are numbered automatically in the order added.
 
 Args:
   - session_id (string, required): Id from reasoning_start_session.
   - thought (string, optional): The reasoning/thinking at this step.
   - action (string, optional): The action taken, if any.
   - observation (string, optional): The result observed, if any.
-  (At least one of thought/action/observation is required.)
+  - steps (array, optional): Batch mode — log up to 20 steps in one call, each {thought?, action?, observation?} with at least one field. Use INSTEAD of the top-level fields (not together), e.g. to record several steps of finished work at once.
+  (Either steps, or at least one of thought/action/observation, is required.)
 
-Returns: JSON with the new step's id and step_number.
+Returns: single mode — JSON with the new step's id and step_number; batch mode — JSON with steps: [{step_id, step_number}, ...] in insertion order.
 
 Error Handling:
   - Returns an error if session_id does not exist (call reasoning_start_session first, or reasoning_list_sessions to find the right id).
@@ -442,6 +534,8 @@ Error Handling:
                 ? result.structuredContent.step_id
                 : null,
             inputShape: {
+              batch: params.steps !== undefined,
+              batch_size: params.steps?.length ?? null,
               thought_present: params.thought !== undefined,
               action_present: params.action !== undefined,
               observation_present: params.observation !== undefined,
@@ -451,6 +545,11 @@ Error Handling:
             },
             outputShape: {
               step_number: result.structuredContent?.step_number ?? null,
+              steps_added: Array.isArray(result.structuredContent?.steps)
+                ? result.structuredContent.steps.length
+                : result.structuredContent?.step_number !== undefined
+                  ? 1
+                  : 0,
             },
           };
         },
@@ -458,16 +557,51 @@ Error Handling:
       async (params: ReasoningAddStepInput) => {
       try {
         const activeDb = await resolveDatabase(database);
-        if (
-          params.thought === undefined &&
-          params.action === undefined &&
-          params.observation === undefined
-        ) {
+        const hasSingleFields =
+          params.thought !== undefined ||
+          params.action !== undefined ||
+          params.observation !== undefined;
+        if (params.steps !== undefined && hasSingleFields) {
           return {
             content: [
               {
                 type: "text" as const,
-                text: "Error: At least one of thought, action, or observation must be provided.",
+                text: "Error: Provide either steps (batch mode) or top-level thought/action/observation (single mode), not both.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        if (params.steps === undefined && !hasSingleFields) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: Either steps (batch mode), or at least one of thought, action, or observation, must be provided.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const entries = params.steps ?? [
+          {
+            thought: params.thought,
+            action: params.action,
+            observation: params.observation,
+          },
+        ];
+        const invalidIndex = entries.findIndex(
+          (entry) =>
+            entry.thought === undefined &&
+            entry.action === undefined &&
+            entry.observation === undefined
+        );
+        if (invalidIndex !== -1) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: steps[${invalidIndex}] must include at least one of thought, action, or observation.`,
               },
             ],
             isError: true,
@@ -499,7 +633,7 @@ Error Handling:
           };
         }
 
-        const output = runInTransaction(activeDb, () => {
+        const insertedSteps = runInTransaction(activeDb, () => {
           const lockedSession = activeDb
             .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
             .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
@@ -514,33 +648,44 @@ Error Handling:
             );
           }
 
-          const nextStepNumber = getNextStepNumber(activeDb, params.session_id);
-          const id = newId("step");
+          const firstStepNumber = getNextStepNumber(activeDb, params.session_id);
           const ts = nowIso();
-          activeDb
-            .prepare(
-              `INSERT INTO reasoning_steps (id, session_id, step_number, thought, action, observation, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
-            )
-            .run(
+          const insertStep = activeDb.prepare(
+            `INSERT INTO reasoning_steps (id, session_id, step_number, thought, action, observation, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          );
+          const created = entries.map((entry, index) => {
+            const id = newId("step");
+            insertStep.run(
               id,
               params.session_id,
-              nextStepNumber,
-              params.thought ?? null,
-              params.action ?? null,
-              params.observation ?? null,
+              firstStepNumber + index,
+              entry.thought ?? null,
+              entry.action ?? null,
+              entry.observation ?? null,
               ts
             );
+            return { step_id: id, step_number: firstStepNumber + index };
+          });
           activeDb
             .prepare(`UPDATE reasoning_sessions SET updated_at = ? WHERE id = ?`)
             .run(ts, params.session_id);
 
-          return {
-            step_id: id,
-            session_id: params.session_id,
-            step_number: nextStepNumber,
-          };
+          return created;
         });
+
+        const output =
+          params.steps !== undefined
+            ? {
+                session_id: params.session_id,
+                steps: insertedSteps,
+                step_count: insertedSteps.length,
+              }
+            : {
+                step_id: insertedSteps[0].step_id,
+                session_id: params.session_id,
+                step_number: insertedSteps[0].step_number,
+              };
         return {
           content: [{ type: "text" as const, text: toLimitedJson(output) }],
           structuredContent: output,
@@ -1339,8 +1484,8 @@ Error Handling:
           const nextMemoryId = newId("mem");
           activeDb
             .prepare(
-              `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, workspace, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               nextMemoryId,
@@ -1355,6 +1500,7 @@ Error Handling:
                 auto_saved: !(params.save_as_memory || params.memory_mode === "always"),
                 step_count: stepCount,
               }),
+              getWorkspace(),
               ts,
               ts
             );
@@ -1390,7 +1536,7 @@ Error Handling:
             usedMemoryFeedbackRecorded += 1;
           } else {
             usedMemoryWarnings.push(
-              `Telemetry is disabled; usage feedback for '${usedMemoryId}' was not recorded.`
+              `Usage feedback for '${usedMemoryId}' could not be recorded.`
             );
           }
         }
