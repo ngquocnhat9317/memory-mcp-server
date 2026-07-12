@@ -22,7 +22,7 @@ import {
   type MemoryUpdateInput,
   type MemoryUsageReportInput,
 } from "../schemas/memory.js";
-import { isTelemetryEnabled } from "../constants.js";
+import { getWorkspace, isTelemetryEnabled } from "../constants.js";
 import type { MemoryRecord, MemoryRow } from "../types.js";
 import {
   handleToolError,
@@ -230,7 +230,7 @@ export function registerMemoryTools(
     {
       title: "Save Memory",
       description:
-        "Persist a piece of long-term memory so it can be recalled in future sessions.",
+        "Persist a piece of long-term memory so it can be recalled in future sessions. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags; the server records the workspace automatically.",
       inputSchema: MemorySaveInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -272,8 +272,8 @@ export function registerMemoryTools(
         const ts = nowIso();
         activeDb
           .prepare(
-            `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, created_at, updated_at)
-             VALUES (@id, @type, @content, @tags, @agent_id, @importance, @metadata, @created_at, @updated_at)`
+            `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, workspace, created_at, updated_at)
+             VALUES (@id, @type, @content, @tags, @agent_id, @importance, @metadata, @workspace, @created_at, @updated_at)`
           )
           .run({
             id,
@@ -283,6 +283,7 @@ export function registerMemoryTools(
             agent_id: params.agent_id ?? null,
             importance: params.importance,
             metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+            workspace: getWorkspace(),
             created_at: ts,
             updated_at: ts,
           });

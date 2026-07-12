@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-11.v4
+Version: 2026-07-12.v5
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -14,7 +14,9 @@ It is organized around the three moments of a task where this MCP matters.
      or trade-offs: call `reasoning_start_session` with a specific title.
 2. Read what the server hands back — this is free recall, act on it:
    - `related_memories`: saved knowledge matched to your title, ranked by
-     text relevance. Review the snippets before working; fetch full content
+     text relevance and biased toward your current workspace. Weak one-word
+     matches are filtered out, so an empty or short list is normal. Review
+     the snippets before working; fetch full content
      with `memory_get` if needed. Entries persisted from a past reasoning
      session carry a `source` field (`{session_id, session_title, created_at}`)
      — when you need to verify how a conclusion was reached, replay its origin
@@ -61,7 +63,10 @@ Always close the session with `reasoning_complete_session`:
 
 Durable memory:
 
-- `memory_save`: store durable facts, decisions, preferences, or summaries
+- `memory_save`: store durable facts, decisions, preferences, or summaries.
+  Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put
+  workspace or project names in tags; the server records the workspace
+  automatically and prefers same-workspace memories at recall time
 - `memory_search`: targeted recall by keyword, topic, or hypothesis
 - `memory_list`: recent or filtered browsing (when browsing beats searching)
 - `memory_get`: fetch one memory by exact id

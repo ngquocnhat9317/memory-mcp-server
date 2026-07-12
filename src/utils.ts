@@ -37,18 +37,25 @@ export function toFtsQuery(raw: string): string {
   return terms.length ? terms.join(" ") : '""';
 }
 
-/** Like toFtsQuery but matches ANY term — used for fuzzy recall by title. */
-export function toFtsOrQuery(raw: string): string {
-  const terms = ftsTerms(raw);
-  return terms.length ? terms.join(" OR ") : '""';
-}
-
 function ftsTerms(raw: string): string[] {
   return raw
     .trim()
     .split(/\s+/)
     .filter(Boolean)
     .map((t) => `"${t.replace(/"/g, '""')}"*`);
+}
+
+/**
+ * Term preparation for auto-recall only. Drops noise tokens (<=2 chars,
+ * the main source of one-word junk matches) and caps the count so long
+ * titles stay cheap. memory_search keeps raw ftsTerms behavior — an
+ * explicit query is the caller's intent.
+ */
+export function toRecallTerms(raw: string): string[] {
+  const tokens = raw.trim().split(/\s+/).filter(Boolean);
+  const significant = tokens.filter((token) => token.length > 2);
+  const chosen = (significant.length > 0 ? significant : tokens).slice(0, 8);
+  return chosen.map((t) => `"${t.replace(/"/g, '""')}"*`);
 }
 
 /** Serialize a value to text, truncating with a clear message if it exceeds CHARACTER_LIMIT. */

@@ -115,8 +115,10 @@ or `memory_list`.
 
 1. **Task start** — the agent calls `reasoning_start_session`. The server
    full-text-searches the title against saved memories and returns
-   `related_memories` in the response, warns about still-open sessions, and
-   auto-abandons stale ones (`MEMORY_SESSION_TTL_HOURS`, default 24).
+   `related_memories` in the response — best text match first, current
+   workspace preferred, weak one-word matches filtered out — warns about
+   still-open sessions, and auto-abandons stale ones
+   (`MEMORY_SESSION_TTL_HOURS`, default 24).
 2. **During the task** — the agent logs decisions and observations with
    `reasoning_add_step` (single, or up to 20 steps per call in batch mode),
    and can mark pivotal steps for later audit.
@@ -140,14 +142,20 @@ the versioned [GUIDELINES.md](./GUIDELINES.md).
 | `MEMORY_DB_PATH` | `~/.memory-mcp-server/memory.db` | SQLite database location |
 | `MEMORY_SESSION_TTL_HOURS` | `24` | Auto-abandon in_progress sessions older than this (`0` disables) |
 | `MEMORY_AUTO_RECALL_LIMIT` | `3` | Max related memories returned at session start (`0` disables) |
+| `MEMORY_WORKSPACE` | current working directory | Workspace identity stamped on saved memories and used to prefer same-workspace results at recall time. The default works out of the box for clients that launch the server inside the project (Claude Code, Codex); set explicitly if yours doesn't |
 | `MEMORY_TELEMETRY` | `off` | Set `on` to record diagnostics events locally (searches, saves, recalls, latency) — required for full data in the report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`). Usage feedback (`used_memory_ids`, `memory_record_usage_feedback`) is a learning signal, not diagnostics: it is always recorded locally, with this flag on or off |
 
 ### Shared vs project-scoped memory
 
 - **Shared** (default path): one agent persona accumulates knowledge across all
-  projects.
+  projects. Since v1.3.0 the shared store is workspace-aware by default:
+  memories are stamped with the workspace they were saved from, and recall
+  softly prefers the current workspace — cross-project memories still surface
+  when they match strongly (that's the point of a shared store), but they no
+  longer crowd out local ones.
 - **Project-scoped**: point `MEMORY_DB_PATH` at a file inside the project
-  (e.g. `.memory/project-memory.db`) for isolation per repository or customer.
+  (e.g. `.memory/project-memory.db`) for hard isolation per repository or
+  customer.
 
 ## Teaching your agent to use it
 
