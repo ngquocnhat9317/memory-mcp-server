@@ -164,7 +164,8 @@ When the `memory` MCP server is available:
 
 - On first use, call `get_usage_guide` and follow it.
 - Non-trivial task? `reasoning_start_session` first — review the
-  `related_memories` it returns before working.
+  `related_memories` it returns before working; if one carries a `source`,
+  you can replay its origin with `reasoning_get_trace`.
 - Log meaningful steps with `reasoning_add_step` (batch mode `steps: [...]`
   is fine for recording finished work).
 - Always close with `reasoning_complete_session`; report helpful memories via
