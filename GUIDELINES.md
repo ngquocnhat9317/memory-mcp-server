@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-11.v3
+Version: 2026-07-11.v4
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -13,9 +13,13 @@ It is organized around the three moments of a task where this MCP matters.
    - Anything multi-step, uncertain, or involving debugging, planning, review,
      or trade-offs: call `reasoning_start_session` with a specific title.
 2. Read what the server hands back — this is free recall, act on it:
-   - `related_memories`: saved knowledge matched to your title. Review the
-     snippets before working; fetch full content with `memory_get` if needed.
-     Remember which ones actually help — you will report them at completion.
+   - `related_memories`: saved knowledge matched to your title, ranked by
+     text relevance. Review the snippets before working; fetch full content
+     with `memory_get` if needed. Entries persisted from a past reasoning
+     session carry a `source` field (`{session_id, session_title, created_at}`)
+     — when you need to verify how a conclusion was reached, replay its origin
+     with `reasoning_get_trace(source.session_id)`. Remember which ones
+     actually help — you will report them at completion.
    - `open_sessions_warning` / `open_sessions`: sessions you (or a previous
      run) forgot to close. Close finished ones with
      `reasoning_complete_session`; stale ones are auto-abandoned by the server.
@@ -41,9 +45,10 @@ Always close the session with `reasoning_complete_session`:
 
 - `conclusion`: the actual answer/decision, written to be reusable.
 - `used_memory_ids`: ids of memories (e.g. from `related_memories`) that
-  genuinely helped. Report honestly, including reporting none. Usage feedback
-  is a learning signal for recall quality and is always recorded locally,
-  regardless of the `MEMORY_TELEMETRY` setting.
+  genuinely helped. Report honestly, including reporting none. Successful
+  usage feedback is a learning signal for recall quality and is always
+  recorded locally, regardless of the `MEMORY_TELEMETRY` setting (failed
+  attempts, e.g. an unknown memory id, return a warning and are not recorded).
 - Saving the conclusion as durable memory is opt-in: pass
   `save_as_memory=true` or `memory_mode='always'`. The default (`auto`) does
   NOT save on its own. Save when the conclusion would help a future task;
@@ -64,7 +69,8 @@ Durable memory:
 - `memory_delete`: remove unsafe, duplicated, or wrong memory
 - `memory_record_usage_feedback`: record whether a recalled memory was
   used/ignored/stale — prefer `used_memory_ids` at completion for the common
-  case; always persisted locally regardless of `MEMORY_TELEMETRY`
+  case; successful feedback is always persisted locally regardless of
+  `MEMORY_TELEMETRY`
 
 Reasoning traces:
 
