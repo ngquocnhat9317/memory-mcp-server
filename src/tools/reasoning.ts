@@ -29,14 +29,15 @@ import type {
   ReasoningSessionRow,
   ReasoningStepRecord,
 } from "../types.js";
-import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS } from "../constants.js";
+import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS, getWorkspace } from "../constants.js";
 import {
   handleToolError,
   newId,
   nowIso,
   parseJsonArray,
-  toFtsOrQuery,
+  parseJsonObject,
   toFtsQuery,
+  toRecallTerms,
   toLimitedJson,
 } from "../utils.js";
 import { recordToolUsageEvent, withTelemetry } from "./telemetry.js";
@@ -218,6 +219,12 @@ interface RelatedMemoryRecord {
   importance: number;
   tags: string[];
   snippet: string;
+  /** Present only for memories persisted from a reasoning session. */
+  source?: {
+    session_id: string;
+    session_title: string;
+    created_at: string;
+  };
 }
 
 function abandonStaleSessions(database: DatabaseSync, now: string): number {
@@ -237,34 +244,108 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
   return Number(result.changes);
 }
 
+/** Candidate pool fetched by BM25 before the floor/re-rank pass. */
+const RECALL_CANDIDATE_POOL = 50;
+
 function recallRelatedMemories(
   database: DatabaseSync,
   title: string
 ): RelatedMemoryRecord[] {
   if (AUTO_RECALL_LIMIT <= 0) return [];
   try {
-    const rows = database
+    const terms = toRecallTerms(title);
+    if (terms.length === 0) return [];
+
+    const candidates = database
       .prepare(
-        `SELECT m.id, m.type, m.content, m.tags, m.importance
+        `SELECT m.rowid AS row_id, m.id, m.type, m.content, m.tags,
+                m.importance, m.metadata, m.created_at, m.updated_at,
+                f.rank AS fts_rank,
+                CASE
+                  WHEN m.workspace = ?     THEN 2
+                  WHEN m.workspace IS NULL THEN 1
+                  ELSE 0
+                END AS workspace_priority
          FROM memories m
-         WHERE m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)
-         ORDER BY m.importance DESC, m.updated_at DESC
+         JOIN (
+           SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
+         ) f ON m.rowid = f.rowid
+         ORDER BY f.rank ASC
          LIMIT ?`
       )
-      .all(toFtsOrQuery(title), AUTO_RECALL_LIMIT) as Array<{
+      .all(getWorkspace(), terms.join(" OR "), RECALL_CANDIDATE_POOL) as Array<{
+      row_id: number;
       id: string;
       type: string;
       content: string;
       tags: string | null;
       importance: number;
+      metadata: string | null;
+      created_at: string;
+      updated_at: string;
+      fts_rank: number;
+      workspace_priority: number;
     }>;
-    return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      importance: row.importance,
-      tags: parseJsonArray(row.tags),
-      snippet: compactSnippetText(row.content),
+    if (candidates.length === 0) return [];
+
+    // Count how many title terms each candidate matches (one cheap FTS
+    // query per term, capped at 8 by toRecallTerms).
+    const matchCounts = new Map<number, number>();
+    for (const term of terms) {
+      const rowIds = database
+        .prepare(`SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?`)
+        .all(term) as Array<{ rowid: number }>;
+      for (const row of rowIds) {
+        matchCounts.set(row.rowid, (matchCounts.get(row.rowid) ?? 0) + 1);
+      }
+    }
+    const scored = candidates.map((candidate) => ({
+      ...candidate,
+      matched: matchCounts.get(candidate.row_id) ?? 1,
     }));
+
+    // Quality floor: multi-term titles require at least two matched terms.
+    // When nothing clears it, fall back to the single best-ranked match
+    // (serendipity lifeline) instead of padding every slot with junk.
+    const required = terms.length >= 3 ? 2 : 1;
+    let pool = scored.filter((candidate) => candidate.matched >= required);
+    let limit = AUTO_RECALL_LIMIT;
+    if (pool.length === 0) {
+      pool = scored;
+      limit = Math.min(1, AUTO_RECALL_LIMIT);
+    }
+
+    pool.sort(
+      (a, b) =>
+        b.matched - a.matched ||
+        b.workspace_priority - a.workspace_priority ||
+        a.fts_rank - b.fts_rank ||
+        b.importance - a.importance ||
+        (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0)
+    );
+
+    return pool.slice(0, limit).map((row) => {
+      const metadata = parseJsonObject(row.metadata);
+      const sourceSessionId = metadata?.source_session_id;
+      const sourceSessionTitle = metadata?.session_title;
+      return {
+        id: row.id,
+        type: row.type,
+        importance: row.importance,
+        tags: parseJsonArray(row.tags),
+        snippet: compactSnippetText(row.content),
+        ...(typeof sourceSessionId === "string" &&
+        typeof sourceSessionTitle === "string"
+          ? {
+              source: {
+                session_id: sourceSessionId,
+                session_title: sourceSessionTitle,
+                created_at: row.created_at,
+              },
+            }
+          : {}),
+      };
+    });
   } catch {
     // Recall is best-effort; a bad FTS query must never block session creation.
     return [];
@@ -288,7 +369,7 @@ Args:
   - agent_id (string, optional): Identifier for the agent/persona running this session.
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session.
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by text relevance, softly preferring the current workspace; weak one-word matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
   - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
@@ -371,10 +452,20 @@ Examples:
             ? { auto_abandoned_sessions: autoAbandoned }
             : {}),
         };
-        const recallNote =
-          relatedMemories.length > 0
-            ? ` Found ${relatedMemories.length} related memories — review them before starting.`
-            : "";
+        let recallNote = "";
+        if (relatedMemories.length > 0) {
+          recallNote = ` Found ${relatedMemories.length} related memories — review them before starting.`;
+        } else {
+          // One-time cold-start nudge: only while the store is completely
+          // empty, so it disappears forever after the first saved memory.
+          const anyMemory = activeDb
+            .prepare(`SELECT EXISTS(SELECT 1 FROM memories) as e`)
+            .get() as { e: number };
+          if (anyMemory.e === 0) {
+            recallNote =
+              " No memories yet — when you complete this session, persist durable conclusions with save_as_memory=true so future sessions can recall them.";
+          }
+        }
         return {
           content: [
             {
@@ -1393,8 +1484,8 @@ Error Handling:
           const nextMemoryId = newId("mem");
           activeDb
             .prepare(
-              `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, workspace, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               nextMemoryId,
@@ -1409,6 +1500,7 @@ Error Handling:
                 auto_saved: !(params.save_as_memory || params.memory_mode === "always"),
                 step_count: stepCount,
               }),
+              getWorkspace(),
               ts,
               ts
             );
@@ -1444,7 +1536,7 @@ Error Handling:
             usedMemoryFeedbackRecorded += 1;
           } else {
             usedMemoryWarnings.push(
-              `Telemetry is disabled; usage feedback for '${usedMemoryId}' was not recorded.`
+              `Usage feedback for '${usedMemoryId}' could not be recorded.`
             );
           }
         }

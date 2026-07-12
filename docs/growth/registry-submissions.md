@@ -5,15 +5,20 @@ registries and directories. Submit top-to-bottom; the first two matter most.
 
 ## Shared copy (reuse everywhere)
 
-- **Name**: Memory MCP Server (with adoption analytics)
+Positioning (same line as the README): **memory that runs itself — your agent
+remembers past work without being told, and you maintain nothing.**
+
+- **Name**: Memory MCP Server
 - **Package**: `@nhatnguyen9317/memory-mcp-server`
 - **Repo**: https://github.com/ngquocnhat9317/memory-mcp-server
-- **One-liner**: Long-term memory + reasoning traces for agents — with built-in analytics that tell you whether your agents actually use it.
+- **One-liner**: Self-operating memory for agents — related past conclusions surface automatically at task start, ranked by relevance, with the reasoning trace they came from.
 - **Description (short)**:
-  > SQLite-backed long-term memory and per-task reasoning traces over stdio. Auto-recalls related memories at session start, auto-abandons stale sessions, and ships adoption telemetry (usage reports, adoption funnel, per-agent scorecards) so you can measure recall hit rate and reuse instead of hoping.
+  > SQLite-backed long-term memory and per-task reasoning traces over stdio. It just remembers: starting a session auto-recalls relevant memories (BM25-ranked, with provenance back to the original reasoning trace), stale sessions clean themselves up, and nothing needs babysitting. Local only — one SQLite file, no cloud, no account. Differentiators in order: (1) auto-recall without being asked, (2) zero maintenance, (3) auditable reasoning traces behind every remembered conclusion, (4) local & private by default.
 - **Install**: `npx -y @nhatnguyen9317/memory-mcp-server`
-- **Categories/tags**: memory, knowledge, reasoning, analytics, sqlite
+- **Categories/tags**: memory, knowledge, reasoning, sqlite
 - **Requirements**: Node >= 22.5 (uses built-in `node:sqlite`, no native build)
+- Do **not** lead any listing with analytics/telemetry — that layer is opt-in
+  diagnostics for multi-agent operators, not the product story.
 
 ## 1. Official MCP Registry (registry.modelcontextprotocol.io)
 
@@ -25,17 +30,17 @@ registries and directories. Submit top-to-bottom; the first two matter most.
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.ngquocnhat9317/memory-mcp-server",
-  "description": "Long-term memory + reasoning traces for agents, with built-in adoption analytics.",
+  "description": "Self-operating memory for agents: auto-recalls relevant past conclusions at task start, with reasoning-trace provenance. Local SQLite, zero maintenance.",
   "repository": {
     "url": "https://github.com/ngquocnhat9317/memory-mcp-server",
     "source": "github"
   },
-  "version": "1.2.5",
+  "version": "1.3.0",
   "packages": [
     {
       "registry_type": "npm",
       "identifier": "@nhatnguyen9317/memory-mcp-server",
-      "version": "1.2.5",
+      "version": "1.3.0",
       "transport": { "type": "stdio" }
     }
   ]
@@ -52,7 +57,7 @@ registries and directories. Submit top-to-bottom; the first two matter most.
   (alphabetical order):
 
 ```md
-- [ngquocnhat9317/memory-mcp-server](https://github.com/ngquocnhat9317/memory-mcp-server) 📇 🏠 - Long-term memory and reasoning traces with auto-recall and built-in adoption analytics (SQLite, no native build)
+- [ngquocnhat9317/memory-mcp-server](https://github.com/ngquocnhat9317/memory-mcp-server) 📇 🏠 - Self-operating agent memory: auto-recall at task start with reasoning-trace provenance, self-cleaning sessions (SQLite, no native build)
 ```
 
 (`📇` = TypeScript, `🏠` = local service — check the legend before submitting.)

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { MCP_VERSION, TELEMETRY_ENABLED } from "../constants.js";
+import { MCP_VERSION, isTelemetryEnabled } from "../constants.js";
 import { handleToolError, newId, nowIso } from "../utils.js";
 
 type DatabaseProvider = DatabaseSync | (() => Promise<DatabaseSync>);
@@ -86,7 +86,17 @@ export async function recordToolUsageEvent(
   database: DatabaseSync,
   event: ToolUsageEventInput
 ): Promise<string | null> {
-  if (!TELEMETRY_ENABLED) return null;
+  // Successful usage-feedback is a first-party learning signal, not
+  // diagnostics: it is always recorded locally so recall quality can be
+  // evaluated and (later) improved. Everything else — including failed
+  // feedback attempts (error_code/latency are diagnostics data) — stays
+  // opt-in via MEMORY_TELEMETRY.
+  if (
+    !isTelemetryEnabled() &&
+    !(event.operationType === "feedback" && event.status === "success")
+  ) {
+    return null;
+  }
 
   try {
     const id = newId("evt");
