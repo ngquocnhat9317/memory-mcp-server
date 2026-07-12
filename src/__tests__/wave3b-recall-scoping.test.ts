@@ -123,6 +123,31 @@ test("floor miss falls back to exactly one best match (AC-8.3)", async () => {
   }
 });
 
+test("repeated title words neither raise the floor nor double-count", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-dedupe");
+
+  try {
+    // Distinct significant terms: step, migration, guide (3) → floor = 2.
+    // A memory matching only 'step' must NOT clear the floor even though
+    // the word appears twice in the title.
+    insertMemory(toolDb, {
+      id: "mem_step_only",
+      content: "step counter widget for the fitness dashboard",
+    });
+    insertMemory(toolDb, {
+      id: "mem_real",
+      content: "migration guide covering each step of the rollout",
+    });
+
+    assert.deepEqual(await recall(tools, "step by step migration guide"), [
+      "mem_real",
+    ]);
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
 test("same-workspace memories win among equal matches (AC-9.1)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("scoping-ws-tie");
 

@@ -1095,6 +1095,11 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
 
     assert.equal(result.isError, undefined);
     assert.equal(result.content[0]?.text, expectedGuide);
+    // AC-9.6: the tag-hygiene rule must be part of the served guide.
+    assert.match(
+      expectedGuide,
+      /not locations|do not put\s+workspace or project names in tags/i
+    );
     assert.deepEqual(result.structuredContent, {
       guide_version: "2026-07-12.v5",
       mcp_version: "1.3.0",
