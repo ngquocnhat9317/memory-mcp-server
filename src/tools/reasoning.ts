@@ -369,7 +369,7 @@ Args:
   - agent_id (string, optional): Identifier for the agent/persona running this session.
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server and ranked by text relevance. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by text relevance, softly preferring the current workspace; weak one-word matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
   - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 

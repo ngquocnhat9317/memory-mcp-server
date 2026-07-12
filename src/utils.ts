@@ -54,7 +54,17 @@ function ftsTerms(raw: string): string[] {
 export function toRecallTerms(raw: string): string[] {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   const significant = tokens.filter((token) => token.length > 2);
-  const chosen = (significant.length > 0 ? significant : tokens).slice(0, 8);
+  // Dedupe case-insensitively: a repeated word must not raise the
+  // match floor or double-count as two matched terms.
+  const seen = new Set<string>();
+  const chosen = (significant.length > 0 ? significant : tokens)
+    .filter((token) => {
+      const key = token.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
   return chosen.map((t) => `"${t.replace(/"/g, '""')}"*`);
 }
 
