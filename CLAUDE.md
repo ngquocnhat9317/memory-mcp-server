@@ -1,4 +1,6 @@
-# AGENTS.md
+# CLAUDE.md
+
+> This file mirrors `AGENTS.md` — if you edit one, apply the same edit to the other.
 
 ## Purpose
 
@@ -38,7 +40,7 @@ Primary source-of-truth paths:
 
 - **Always sync the docs in the same change as the code update.** After any code change, re-check `GUIDELINES.md`, `README.md`, and `CHANGELOG.md`; if the behavior they describe changed, update them together with the code — never leave them one release behind.
 - When `GUIDELINES.md` changes, bump its `Version:` line and update the matching assertions in `src/__tests__/reasoning-audit-tools.test.ts`.
-- `CLAUDE.md` is a mirror of this file — apply any edit here to `CLAUDE.md` as well.
+- `AGENTS.md` is the twin of this file — apply any edit here to `AGENTS.md` as well.
 - Do not copy `README.md` setup guidance into this file.
 
 ## Repo Map

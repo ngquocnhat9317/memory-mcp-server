@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-11.v1
+Version: 2026-07-12.v5
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -13,9 +13,15 @@ It is organized around the three moments of a task where this MCP matters.
    - Anything multi-step, uncertain, or involving debugging, planning, review,
      or trade-offs: call `reasoning_start_session` with a specific title.
 2. Read what the server hands back — this is free recall, act on it:
-   - `related_memories`: saved knowledge matched to your title. Review the
-     snippets before working; fetch full content with `memory_get` if needed.
-     Remember which ones actually help — you will report them at completion.
+   - `related_memories`: saved knowledge matched to your title, ranked by
+     text relevance and biased toward your current workspace. Weak one-word
+     matches are filtered out, so an empty or short list is normal. Review
+     the snippets before working; fetch full content
+     with `memory_get` if needed. Entries persisted from a past reasoning
+     session carry a `source` field (`{session_id, session_title, created_at}`)
+     — when you need to verify how a conclusion was reached, replay its origin
+     with `reasoning_get_trace(source.session_id)`. Remember which ones
+     actually help — you will report them at completion.
    - `open_sessions_warning` / `open_sessions`: sessions you (or a previous
      run) forgot to close. Close finished ones with
      `reasoning_complete_session`; stale ones are auto-abandoned by the server.
@@ -41,8 +47,10 @@ Always close the session with `reasoning_complete_session`:
 
 - `conclusion`: the actual answer/decision, written to be reusable.
 - `used_memory_ids`: ids of memories (e.g. from `related_memories`) that
-  genuinely helped. This is how recall quality gets measured — report honestly,
-  including reporting none.
+  genuinely helped. Report honestly, including reporting none. Successful
+  usage feedback is a learning signal for recall quality and is always
+  recorded locally, regardless of the `MEMORY_TELEMETRY` setting (failed
+  attempts, e.g. an unknown memory id, return a warning and are not recorded).
 - Saving the conclusion as durable memory is opt-in: pass
   `save_as_memory=true` or `memory_mode='always'`. The default (`auto`) does
   NOT save on its own. Save when the conclusion would help a future task;
@@ -55,14 +63,19 @@ Always close the session with `reasoning_complete_session`:
 
 Durable memory:
 
-- `memory_save`: store durable facts, decisions, preferences, or summaries
+- `memory_save`: store durable facts, decisions, preferences, or summaries.
+  Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put
+  workspace or project names in tags; the server records the workspace
+  automatically and prefers same-workspace memories at recall time
 - `memory_search`: targeted recall by keyword, topic, or hypothesis
 - `memory_list`: recent or filtered browsing (when browsing beats searching)
 - `memory_get`: fetch one memory by exact id
 - `memory_update`: correct an existing memory in place
 - `memory_delete`: remove unsafe, duplicated, or wrong memory
 - `memory_record_usage_feedback`: record whether a recalled memory was
-  used/ignored/stale — prefer `used_memory_ids` at completion for the common case
+  used/ignored/stale — prefer `used_memory_ids` at completion for the common
+  case; successful feedback is always persisted locally regardless of
+  `MEMORY_TELEMETRY`
 
 Reasoning traces:
 
@@ -77,7 +90,9 @@ Audit & reports (mostly for reviewers and operators, not everyday tasks):
   `reasoning_get_session_outline`, `reasoning_search_steps`: navigate traces
   by their pivotal moments
 - `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`:
-  telemetry-backed views of how memory/reasoning is actually being used
+  telemetry-backed views of how memory/reasoning is actually being used — with
+  `MEMORY_TELEMETRY` off (the default) only usage-feedback events and session
+  tables have data; full funnels and ratios need `MEMORY_TELEMETRY=on`
 
 ## Do Not Store
 
