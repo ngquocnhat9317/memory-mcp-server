@@ -1,6 +1,6 @@
 # Architecture
 
-Version: 1.3.0
+Version: 1.3.1
 
 This document describes how `memory-mcp-server` is built, for contributors
 working inside this repository. For install/usage instructions see
@@ -38,7 +38,9 @@ to stderr at startup; this is expected and does not indicate a problem.
 Requests flow through four layers, each with one responsibility:
 
 ```
-index.ts            tool registration + MCP transport wiring
+index.ts             CLI dispatcher: routes argv to server.ts or install-agents.ts
+   |
+server.ts            tool registration + MCP transport wiring
    |
 tools/*.ts           tool handlers: validate → do the work → shape the response
    |
@@ -47,13 +49,31 @@ schemas/*.ts          zod input contracts consumed by tools/*.ts
 db.ts                 opens the SQLite database, runs pending migrations
 ```
 
-`src/index.ts` is the entry point: it constructs the `McpServer`, calls each
-`register*Tools(server)` function, and connects a `StdioServerTransport`.
-Importing `src/db.ts` has a side effect — it opens (or creates) the SQLite
-file at `DB_PATH`, sets `PRAGMA journal_mode = WAL` and
+`src/index.ts` is the package's bin entry point, but it does no MCP work
+itself: it reads `process.argv[2]` and dynamically `import()`s exactly one
+of two modules, so loading one never triggers the other's side effects —
+critically, the `install-agents` path must never import `./db.js`. With no
+subcommand (the default, used by every existing client config), it loads
+`src/server.ts`, which constructs the `McpServer`, calls each
+`register*Tools(server)` function, and connects a `StdioServerTransport` —
+this is the code that used to live directly in `index.ts`. With the
+`install-agents` subcommand, it loads `src/install-agents.ts` instead (see
+below), which never touches the MCP/database path at all.
+
+Importing `src/db.ts` (from `server.ts`) has a side effect — it opens (or
+creates) the SQLite file at `DB_PATH`, sets `PRAGMA journal_mode = WAL` and
 `PRAGMA foreign_keys = ON`, and runs `runMigrations(db)` — so the schema is
-always current before any tool handler runs. `src/index.ts` imports `./db.js`
-purely for this side effect, before registering tools.
+always current before any tool handler runs. `src/server.ts` imports
+`./db.js` purely for this side effect, before registering tools.
+
+`src/install-agents.ts` is a separate, one-shot setup utility, not part of
+the MCP-serving path above: invoked via `memory-mcp-server install-agents`
+(or independently via `scripts/install-agent-snippet.sh` for users who
+haven't installed the package yet), it reads the pasteable snippet out of
+`README.md` (between `<!-- MEMORY_MCP_SERVER_START/END -->` markers) and
+idempotently writes it into a user's global `~/.claude/CLAUDE.md` and
+`~/.codex/AGENTS.md`. It never touches the MCP server, the database, or any
+project-scoped file.
 
 Each `register*Tools` function accepts an optional `DatabaseSync` parameter
 that defaults to the module-level `db` singleton from `db.ts`. Production
@@ -74,7 +94,9 @@ Supporting modules used across layers:
 
 | File | Responsibility |
 | --- | --- |
-| `src/index.ts` | Entry point: constructs the `McpServer`, registers all tool groups, connects the stdio transport |
+| `src/index.ts` | Bin entry point / CLI dispatcher: routes argv to `server.ts` (default) or `install-agents.ts` (`install-agents` subcommand) |
+| `src/server.ts` | Constructs the `McpServer`, registers all tool groups, connects the stdio transport (moved out of `index.ts`) |
+| `src/install-agents.ts` | `install-agents` CLI subcommand: installs the README's agent-guidance snippet into global Claude Code / Codex CLI config |
 | `src/db.ts` | Opens the SQLite database at `DB_PATH`, sets PRAGMAs, runs migrations on import (side effect) |
 | `src/constants.ts` | `MCP_VERSION`, `DB_PATH`, and all environment-variable-driven configuration defaults |
 | `src/types.ts` | Shared TypeScript types for database rows and tool I/O |

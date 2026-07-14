@@ -3,7 +3,7 @@ import os from "node:os";
 
 /** Max characters returned in a single tool response before truncation. */
 export const CHARACTER_LIMIT = 25000;
-export const MCP_VERSION = "1.3.0";
+export const MCP_VERSION = "1.3.1";
 /**
  * Diagnostics-event recording is opt-in: set MEMORY_TELEMETRY=on to enable.
  * Read at call time so tests and long-lived processes can toggle it.
