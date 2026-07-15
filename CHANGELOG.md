@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1 (2026-07-14)
+
+Theme: contributor documentation catches up with the code, plus a one-command way to teach an agent to use this MCP.
+
+### Added
+
+- **Contributor architecture docs**: `docs/architecture.md` (layering, module map, data flow, storage model) and `docs/roadmap.md` (shipped/planned release index) — previously only user-facing docs (`README.md`, `GUIDELINES.md`) existed for this repo. `docs/architecture.md`'s `Version:` line is now locked to `package.json`'s version by a new test, `src/__tests__/architecture-doc-version.test.ts`. `AGENTS.md`/`CLAUDE.md` gained Docs Conventions, Release Process, and Version-Sync Conventions sections formalizing where new docs go and what must stay in sync on every release.
+- **`pre-merge-review` skill** (`.claude/skills/pre-merge-review/`): a structured build/test + docs/version-sync check to run before merging a branch.
+- **`install-agents` CLI subcommand**: after installing the package, `npx @nhatnguyen9317/memory-mcp-server install-agents` writes the README's "Memory MCP Server" agent-guidance snippet into a user's global `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, idempotently (safe to re-run, backs up the existing file to `<path>.bak` first). For users who haven't installed the package yet, `scripts/install-agent-snippet.sh` does the same thing via `curl -fsSL <url> | bash`, no local Node install required first.
+
+### Changed
+
+- Design specs and implementation plans moved into a single `docs/design/` and `docs/plans/` hierarchy (previously split across `docs/plan-improvement-performance/` and `docs/superpowers/` with inconsistent naming); one previously-untracked spec is now committed. No content changes, links preserved.
+
 ## 1.3.0 (2026-07-11)
 
 Theme: recall that stays right as the store grows — relevance ranking, provenance, and an always-on learning signal.
