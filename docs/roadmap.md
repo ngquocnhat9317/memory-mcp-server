@@ -21,6 +21,7 @@ already state.
 | --- | --- | --- |
 | `1.3.5` | Provenance consistency (WI-10), recall relevance eval base (WI-11), duplicate-surfacing hint on `memory_save` (WI-13). WI-12 and WI-14 were evaluated and dropped — see the spec §8 for why | [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) |
 | `1.4.0` | Wave 4 candidates (WI-6, WI-7) — gated behind a 4–6 week real-usage evidence window defined in the Wave 3 spec §9.3; not started until that gate opens | [2026-07-11-spec-mcp-value-improvement.md](design/2026-07-11-spec-mcp-value-improvement.md) §9 |
+| _TBD_ | Codebase Memory (Codegraph) — structured code index: `code_symbols` + `code_edges` + FTS5, `codegraph_*` tools for file→symbols, symbol→definition (file:line), and caller/callee lookups; agent-fed, workspace-scoped, no new dependency. Draft — awaiting owner approval before coding | [2026-07-15-memory-codebase.md](design/2026-07-15-memory-codebase.md) |
 
 ## How to Read This
 
