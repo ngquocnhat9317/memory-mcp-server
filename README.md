@@ -163,47 +163,22 @@ The runtime agent never reads this README — it only sees tool names, schemas,
 and whatever it can call. The reliable pattern:
 
 1. Install the MCP (above).
-2. Paste a short snippet into your own repo's `AGENTS.md` / client prompt —
-   or install it into your **global** Claude Code / Codex CLI config
-   automatically:
-
-   ```bash
-   # after installing the package (above)
-   npx @nhatnguyen9317/memory-mcp-server install-agents
-
-   # or, without installing anything first
-   curl -fsSL https://raw.githubusercontent.com/ngquocnhat9317/memory-mcp-server/master/scripts/install-agent-snippet.sh | bash
-   ```
-
-   Both are idempotent (safe to re-run) and back up any file they touch to
-   `<path>.bak` first.
+2. Paste a short snippet into your own repo's `AGENTS.md` / client prompt:
 
 ```md
-<!-- MEMORY_MCP_SERVER_START -->
-## Memory MCP Server
+## Memory MCP
 
-**Hard gate — before anything else, every session, no exceptions:** if
-`memory_*` / `reasoning_*` tools are listed (even deferred/lazy-loaded — load
-them first, don't skip because schemas aren't visible yet), call
-`get_usage_guide` and follow it. Do this unconditionally, before judging
-whether the task looks like it needs memory.
+When the `memory` MCP server is available:
 
-| Thought | Reality |
-| --- | --- |
-| "This task looks simple" | Check first, decide after — the guide says what counts as trivial |
-| "Tools aren't loaded yet" | Load them, don't skip the gate |
-| "I'll search directly instead" | `get_usage_guide` first — it defines when search vs. a reasoning session applies |
-
-- Non-trivial task (multi-step, debugging, planning, trade-offs)?
-  `reasoning_start_session` first — review the `related_memories` it
-  returns before working; if one carries a `source`, you can replay its
-  origin with `reasoning_get_trace`.
+- On first use, call `get_usage_guide` and follow it.
+- Non-trivial task? `reasoning_start_session` first — review the
+  `related_memories` it returns before working; if one carries a `source`,
+  you can replay its origin with `reasoning_get_trace`.
 - Log meaningful steps with `reasoning_add_step` (batch mode `steps: [...]`
   is fine for recording finished work).
 - Always close with `reasoning_complete_session`; report helpful memories via
   `used_memory_ids`; pass `save_as_memory=true` for durable conclusions.
 - Never store secrets, tokens, or raw sensitive data.
-<!-- MEMORY_MCP_SERVER_END -->
 ```
 
 ## Tool Surface

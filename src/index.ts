@@ -5,30 +5,32 @@
  * An MCP server that gives an agent durable long-term memory and the
  * ability to record/retrieve step-by-step reasoning traces, backed by
  * a local SQLite database (with full-text search over memories).
- *
- * CLI subcommands (checked via argv before anything else loads, so
- * `install-agents` never triggers the server's DB initialization):
- *   - (none)          -> starts the MCP server over stdio
- *   - install-agents  -> installs the README snippet into global agent config
  */
 
-async function main(): Promise<void> {
-  const subcommand = process.argv[2];
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { DB_PATH, MCP_VERSION } from "./constants.js";
+import "./db.js"; // ensures schema is created before tools run
+import { registerMemoryTools } from "./tools/memory.js";
+import { registerReasoningTools } from "./tools/reasoning.js";
+import { registerUsageGuideTool } from "./tools/usage-guide.js";
 
-  if (subcommand === "install-agents") {
-    const { installAgents } = await import("./install-agents.js");
-    await installAgents();
-  } else {
-    const { runServer } = await import("./server.js");
-    await runServer();
-  }
+const server = new McpServer({
+  name: "memory-mcp-server",
+  version: MCP_VERSION,
+});
+
+registerMemoryTools(server);
+registerReasoningTools(server);
+registerUsageGuideTool(server);
+
+async function main(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error(`memory-mcp-server running via stdio (db: ${DB_PATH})`);
 }
 
 main().catch((error) => {
-  const label =
-    process.argv[2] === "install-agents"
-      ? "Fatal error running install-agents"
-      : "Fatal error starting memory-mcp-server";
-  console.error(`${label}:`, error);
+  console.error("Fatal error starting memory-mcp-server:", error);
   process.exit(1);
 });
