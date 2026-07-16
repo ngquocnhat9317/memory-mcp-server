@@ -19,7 +19,7 @@ already state.
 
 | Target | Theme | Design spec |
 | --- | --- | --- |
-| `1.3.5` | Provenance consistency (WI-10), recall relevance eval base (WI-11), duplicate-surfacing hint on `memory_save` (WI-13). WI-12 and WI-14 were evaluated and dropped — see the spec §8 for why | [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) |
+| `1.3.5` | Provenance consistency (WI-10), recall relevance eval base (WI-11), duplicate-surfacing hint on `memory_save` (WI-13), memory-scope hygiene — persona/self-identity guidance in GUIDELINES and schema descriptions (WI-15). WI-12 and WI-14 were evaluated and dropped — see the spec §8 for why | [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) |
 | `1.4.0` | Wave 4 candidates (WI-6, WI-7) — gated behind a 4–6 week real-usage evidence window defined in the Wave 3 spec §9.3; not started until that gate opens | [2026-07-11-spec-mcp-value-improvement.md](design/2026-07-11-spec-mcp-value-improvement.md) §9 |
 
 ## How to Read This
