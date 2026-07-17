@@ -1101,7 +1101,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
       /not locations|do not put\s+workspace or project names in tags/i
     );
     assert.deepEqual(result.structuredContent, {
-      guide_version: "2026-07-12.v5",
+      guide_version: "2026-07-17.v6",
       mcp_version: "1.3.1",
       path: "GUIDELINES.md",
       format: "markdown",
@@ -1126,7 +1126,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     assert.equal(event.tool_name, "get_usage_guide");
     assert.equal(event.operation_type, "guidance");
     assert.equal(event.access_type, "derived");
-    assert.equal(event.guidance_version, "2026-07-12.v5");
+    assert.equal(event.guidance_version, "2026-07-17.v6");
     assert.equal(event.agent_id, "agent-guide");
     assert.equal(event.client_name, "codex");
   } finally {
