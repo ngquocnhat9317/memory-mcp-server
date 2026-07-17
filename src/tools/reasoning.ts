@@ -370,7 +370,7 @@ Args:
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
   - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by text relevance, softly preferring the current workspace; weak one-word matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
-  - open_sessions / open_sessions_warning: other in_progress sessions you may have forgotten to close.
+  - open_sessions / open_sessions_warning: other in_progress sessions. Close the ones you opened and finished; leave sessions you don't recognize alone (they may belong to another agent or run).
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
 Examples:
@@ -444,7 +444,7 @@ Examples:
           related_memories: relatedMemories,
           ...(openSessions.length > 0
             ? {
-                open_sessions_warning: `You have ${openSessions.length} other in_progress session(s). Close finished ones with reasoning_complete_session.`,
+                open_sessions_warning: `You have ${openSessions.length} other in_progress session(s). Close the ones you opened and finished with reasoning_complete_session; leave sessions you don't recognize alone.`,
                 open_sessions: openSessions,
               }
             : {}),
