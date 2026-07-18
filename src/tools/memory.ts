@@ -230,7 +230,7 @@ export function registerMemoryTools(
     {
       title: "Save Memory",
       description:
-        "Persist a piece of long-term memory so it can be recalled in future sessions. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags; the server records the workspace automatically.",
+        "Persist a piece of long-term memory so it can be recalled in future sessions. Returns the created memory's id. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags; the server records the workspace automatically.",
       inputSchema: MemorySaveInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -309,7 +309,7 @@ export function registerMemoryTools(
     {
       title: "Search Memories",
       description:
-        "Full-text search over saved memories (content and tags), ranked by relevance.",
+        "Full-text search over saved memories (content and tags), ranked by relevance. Optional filters: type, agent_id, tags (results must contain all); paginate with limit (default 20, max 200) and offset.",
       inputSchema: MemorySearchInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -407,7 +407,7 @@ export function registerMemoryTools(
     {
       title: "List Memories",
       description:
-        "List saved memories with optional filters, sorted chronologically or by importance.",
+        "List saved memories with optional filters (type, agent_id, tags, min_importance), sorted by created_at, updated_at (default, newest first), or importance.",
       inputSchema: MemoryListInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -553,7 +553,8 @@ export function registerMemoryTools(
     "memory_update",
     {
       title: "Update Memory",
-      description: "Update one or more fields of an existing memory.",
+      description:
+        "Update one or more fields of an existing memory. Partial update: only the fields you pass change; omitted fields are preserved. `tags`/`metadata` replace the whole value — use `tags_append`/`tags_remove`/`metadata_patch` for incremental changes. At least one updatable field is required.",
       inputSchema: MemoryUpdateInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -689,7 +690,8 @@ export function registerMemoryTools(
     "memory_delete",
     {
       title: "Delete Memory",
-      description: "Permanently delete a memory by id.",
+      description:
+        "Permanently delete a memory by id. Hard delete with no undo — prefer memory_update when the memory is merely wrong or outdated.",
       inputSchema: MemoryDeleteInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -1255,7 +1257,7 @@ export function registerMemoryTools(
     {
       title: "Record Memory Usage Feedback",
       description:
-        "Record whether a recalled memory was used, ignored, stale, or unsafe to use. Feedback is a first-party learning signal for recall quality and is always persisted locally, regardless of the MEMORY_TELEMETRY setting.",
+        "Record how a recalled memory turned out — usefulness is one of: used, ignored, irrelevant, stale, unsafe_to_use. For the common 'used' case, prefer used_memory_ids on reasoning_complete_session; call this tool directly for tasks without a session, or the moment a recalled memory turns out stale or wrong. Feedback is a first-party learning signal for recall quality and is always persisted locally, regardless of the MEMORY_TELEMETRY setting.",
       inputSchema: MemoryRecordUsageFeedbackInputSchema.shape,
       annotations: {
         readOnlyHint: false,
