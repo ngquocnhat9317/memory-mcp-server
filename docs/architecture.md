@@ -1,6 +1,6 @@
 # Architecture
 
-Version: 1.3.1
+Version: 1.3.2
 
 This document describes how `memory-mcp-server` is built, for contributors
 working inside this repository. For install/usage instructions see

@@ -14,12 +14,13 @@ already state.
 | `1.2.5` | Wave 2 — cut logging friction: batch `reasoning_add_step`, GUIDELINES rewritten around the task lifecycle, README rewritten as a landing page | *(predates the `docs/design/` spec set — see `CHANGELOG.md`)* |
 | `1.3.0` | Wave 3 + amendment — recall that stays right as the store grows: BM25 relevance ranking, provenance on `related_memories`, usage feedback decoupled from the telemetry gate, recall quality floor, workspace-aware ranking | [2026-07-11-spec-mcp-value-improvement.md](design/2026-07-11-spec-mcp-value-improvement.md), [2026-07-12-spec-recall-precision-workspace.md](design/2026-07-12-spec-recall-precision-workspace.md) |
 | `1.3.1` | Agent-guidance snippet installer: `install-agents` CLI subcommand and `scripts/install-agent-snippet.sh` (`curl \| bash`), both writing the README's Memory MCP snippet into global Claude Code / Codex CLI config | *(no design spec — ad hoc; see `CHANGELOG.md`)* |
+| `1.3.2` | Guide-contract alignment: `GUIDELINES.md` synced with real tool contracts (`v5`→`v6`→`v7`), server-level `instructions` field, tool description clarity pass, new docs-consistency test; conflict-check and mark-step guidance tightened from soft suggestions to concrete triggers after telemetry showed near-zero adoption | *(no design spec — ad hoc; see `CHANGELOG.md`; monitoring note in [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) §8.1)* |
 
 ## Planned / Next
 
 | Target | Theme | Design spec |
 | --- | --- | --- |
-| `1.3.5` | Provenance consistency (WI-10), recall relevance eval base (WI-11), duplicate-surfacing hint on `memory_save` (WI-13). WI-12 and WI-14 were evaluated and dropped — see the spec §8 for why | [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) |
+| `1.3.5` | Provenance consistency (WI-10), recall relevance eval base (WI-11), duplicate-surfacing hint on `memory_save` (WI-13), memory-scope hygiene — persona/self-identity guidance in GUIDELINES and schema descriptions (WI-15). WI-12 and WI-14 were evaluated and dropped — see the spec §8 for why | [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) |
 | `1.4.0` | Wave 4 candidates (WI-6, WI-7) — gated behind a 4–6 week real-usage evidence window defined in the Wave 3 spec §9.3; not started until that gate opens | [2026-07-11-spec-mcp-value-improvement.md](design/2026-07-11-spec-mcp-value-improvement.md) §9 |
 
 ## How to Read This
