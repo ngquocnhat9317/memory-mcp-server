@@ -39,7 +39,7 @@ export const MemorySaveInputSchema = z
       .max(20)
       .default([])
       .describe(
-        "Short lowercase labels for filtering/search, e.g. ['project-x','backend']."
+        "Short lowercase topic labels for filtering/search, e.g. ['sqlite','backend'] — topics, not workspace or project names."
       ),
     importance: z
       .number()
