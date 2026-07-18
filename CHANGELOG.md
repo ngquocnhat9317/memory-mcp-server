@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.2 (2026-07-18)
+
+Theme: guide-contract alignment — `GUIDELINES.md`, tool descriptions, and server instructions now match what the code actually does, locked in by a new docs-consistency test; conflict-check and step-marking guidance tightened from soft suggestions into concrete triggers after live-store telemetry showed near-zero adoption.
+
+### Added
+
+- **Server-level `instructions`**: `runServer()` now passes an `instructions` string to the `McpServer` constructor (`src/server.ts`) summarizing the core reasoning/memory loop (start session → log steps → complete with conclusion/`used_memory_ids`; `save_as_memory` is opt-in; never store secrets), so MCP clients that surface server instructions show this guidance without an extra tool call.
+- **`src/__tests__/docs-consistency.test.ts`**: locks two invariants against drift — every registered tool name must appear in `GUIDELINES.md`, and the guide must not contradict specific schema contracts (`memory_mode='never'` requires `not_saved_reason`; the `session_id` vs `step_id` distinction between `reasoning_add_step`/`reasoning_complete_session` and `reasoning_mark_step`).
+
+### Changed
+
+- **`GUIDELINES.md` bumped `2026-07-12.v5` → `2026-07-17.v6` → `2026-07-18.v7`**. v6: added trivial-vs-multi-step examples, clarified that `open_sessions` belonging to other agents/runs should be left alone, documented the `thought`/`action`/`observation` step fields, made `conclusion` required even when abandoning a session, clarified `memory_record_usage_feedback`'s five usefulness values and its no-session use case, added `memory_type`/`memory_importance` selection guidance, documented `get_usage_guide` in the Tool Reference, and clarified the `MEMORY_TELEMETRY` env var's scope. v7 (this release): live-store telemetry showed the conflict-check and mark-step guidance were soft suggestions that never fired even though their preconditions occurred in most sessions — both are now concrete, explicit steps (an IF/THEN conflict check on `related_memories`, and a listed set of trigger conditions for `reasoning_mark_step`) instead of vague "when it seems useful" phrasing.
+- **Tool description clarity pass** (`src/schemas/memory.ts`, `src/tools/memory.ts`, `src/tools/reasoning.ts`): `memory_save` documents that it returns the created id; `memory_search`/`memory_list` document their filters and pagination; `memory_update` documents partial-update semantics and the append/remove/patch fields; `memory_delete` warns it is a hard, unrecoverable delete; `memory_record_usage_feedback` documents its five usefulness values; tag guidance reworded to "topics, not workspace or project names."
+- `src/__tests__/reasoning-audit-tools.test.ts`: `guide_version`/`guidance_version` assertions synced to `2026-07-18.v7`.
+
+### Notes
+
+- Live-store telemetry (`MEMORY_TELEMETRY=on`) showed the manual memory CRUD surface (`memory_save`/`search`/`list`/`delete`) and the entire reasoning audit tier (`reasoning_get_trace`/`list_sessions`/`search_steps`/`list_milestones`/`get_session_outline`/`mark_step`) at zero real-world calls, while the automatic recall → save → feedback pipeline shows a 63% memory reuse rate. Recorded as an owner monitoring decision in `docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md` §8.1: keep observing with the tightened guide; remove the affected tools in a future release if usage stays near zero.
+
 ## 1.3.1 (2026-07-14)
 
 Theme: contributor documentation catches up with the code, plus a one-command way to teach an agent to use this MCP.

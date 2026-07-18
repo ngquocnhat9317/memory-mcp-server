@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-17.v6
+Version: 2026-07-18.v7
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -29,9 +29,13 @@ Tool schemas and descriptions are the source of truth for parameter contracts
      — when you need to verify how a conclusion was reached, replay its origin
      with `reasoning_get_trace(source.session_id)`. Remember which ones
      actually help — you will report them at completion.
-     If two recalled memories conflict, prefer the newer, same-workspace one
-     (and one whose `source` trace you can replay); consider cleaning up the
-     loser with `memory_update` or `memory_delete`.
+     If `related_memories` has 2 or more entries, do not act on the first one
+     blindly: skim all the snippets for contradictions before proceeding.
+       - Agree or don't overlap → use the most relevant one(s) directly.
+       - Conflict, or you're unsure → call
+         `reasoning_get_trace(source.session_id)` on the newer, same-workspace
+         one *before* deciding, not after. Once resolved, clean up the losing
+         memory with `memory_update` or `memory_delete`.
    - `open_sessions_warning` / `open_sessions`: sessions left in_progress.
      Close the ones YOU opened and finished with
      `reasoning_complete_session`. Leave sessions you don't recognize alone —
@@ -56,9 +60,14 @@ instead takes the `step_id` returned by `reasoning_add_step`.
   `steps: [{thought/action/observation}, ...]` logs up to 20 steps in one
   call — ideal for recording a stretch of work you just finished instead of
   pausing after every step. A post-hoc trace is far better than an empty one.
-- Mark pivotal steps with `reasoning_mark_step` (`decision`, `conflict`,
-  `hypothesis`, `milestone`, `important`) when a future reviewer would want to
-  jump straight to them.
+- Mark pivotal steps with `reasoning_mark_step` in the same turn you log
+  them with `reasoning_add_step` — don't defer it, deferred marks get
+  forgotten. Call it whenever the step you just logged was any of: a choice
+  between alternatives (`decision`), an option you rejected (`decision`),
+  a genuine contradiction you found (`conflict`), an unverified guess you're
+  about to test (`hypothesis`), or a result that changed the direction of the
+  task (`milestone`). If none of these apply, skip it — not every step needs
+  a mark.
 
 ## Moment 3 — Task End
 
