@@ -230,7 +230,7 @@ export function registerMemoryTools(
     {
       title: "Save Memory",
       description:
-        "Persist a piece of long-term memory so it can be recalled in future sessions. Returns the created memory's id. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags; the server records the workspace automatically.",
+        "Persist a piece of long-term memory so it can be recalled in future sessions. Returns the created memory's id. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags. Pass workspace (your project directory) so the memory is scoped to this project; if omitted the server records its own working directory, and '/' or the home directory are stored as unknown.",
       inputSchema: MemorySaveInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -283,7 +283,7 @@ export function registerMemoryTools(
             agent_id: params.agent_id ?? null,
             importance: params.importance,
             metadata: params.metadata ? JSON.stringify(params.metadata) : null,
-            workspace: getWorkspace(),
+            workspace: getWorkspace(params.workspace),
             created_at: ts,
             updated_at: ts,
           });

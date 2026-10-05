@@ -64,6 +64,39 @@ When bumping the package version, update in this order, in the same change:
 - `GUIDELINES.md`'s `Version:` line must match the version asserted in `src/__tests__/reasoning-audit-tools.test.ts` (`structuredContent.guide_version`). When `GUIDELINES.md` changes, bump its `Version:` line and update that assertion in the same change.
 - `docs/architecture.md`'s `Version:` line must match `package.json`'s `version` field, enforced by `src/__tests__/architecture-doc-version.test.ts`. Bump both together on every release — even a release with no architectural change — or the test fails the build.
 
+## Tool Surface Policy
+
+When deciding whether a registered tool should be kept, improved, or removed
+for low real-world usage, use this standing threshold (owner decision,
+2026-08-07):
+
+- **Metric:** `tool_rate = (tool calls in the observation window) / (reasoning
+  sessions opened in the same window) × 100%`. Read straight from
+  `tool_usage_events` (`GROUP BY tool_name`) and `reasoning_sessions`
+  (`COUNT(*) WHERE created_at >= <window start>`) — no `session_id` join
+  required. A tool called more than once per session can exceed 100%; that is
+  correct, not a bug in the formula.
+- **Thresholds:**
+  - `tool_rate >= 30%` → keep as-is, no action.
+  - `5% < tool_rate < 30%` → under-used; review and propose an improvement
+    (better guidance, clearer trigger, or a design change) before considering
+    removal.
+  - `tool_rate <= 5%` → candidate for removal and surface cleanup.
+- **Observation window:** count only from the start of the currently-running
+  `GUIDELINES.md` version — mixing data from a prior guide version dilutes the
+  signal a guide change was meant to produce. Record the window's start/end
+  dates and the guide version in effect wherever the metric is reported.
+- **Minimum sample:** do not decide on fewer than 20 reasoning sessions opened
+  in the window; extend the window instead of deciding on a small sample.
+- **Removing a tool is a breaking change to the MCP tool surface** — it
+  requires its own `MCP_VERSION`/`package.json` bump and `CHANGELOG.md` entry
+  per the Release Process above, regardless of which version line it lands on.
+- A specific application of this policy (window dates, current candidate
+  list, the reusable SQL) lives in
+  [`docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md`](docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md)
+  §8.1 / §8.1.1 / §8.1.2 — this section is the durable rule, that spec is one
+  measurement against it.
+
 ## Repo Map
 
 - `src/tools/memory.ts` — memory tools, telemetry reports, feedback tools

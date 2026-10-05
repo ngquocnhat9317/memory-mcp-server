@@ -2,7 +2,54 @@
 
 Date: 2026-07-03
 Project: `memory-mcp-server`
-Status: Draft for user review
+Status: ⚠️ **HISTORICAL — fully implemented, but its founding premise is contradicted by measured usage.** See the note below before treating anything here as live direction.
+
+---
+
+## Status note (added 2026-08-07)
+
+**Everything in this document shipped.** `reasoning_mark_step`,
+`reasoning_list_milestones`, `reasoning_search_steps`,
+`reasoning_get_session_outline`, the `reasoning_step_marks` table, migrations
+`0001`–`0003` with FTS backfill, and the `reasoning_list_sessions` N+1 fix are
+all live. As an implementation record this document is accurate.
+
+**But its premise no longer holds.** The Problem Statement above argues the
+MCP "is still weak as an audit tool" and that finding the relevant step,
+marking important events, and reviewing sessions without loading full traces
+are real unmet needs. Six weeks of telemetry say those needs are not being
+exercised. Measured 2026-08-07 across 296 `tool_usage_events` spanning
+2026-07-16 → 2026-08-07:
+
+| Tool this document introduced | Calls |
+|---|---:|
+| `reasoning_mark_step` | **24** |
+| `reasoning_list_milestones` | **0** |
+| `reasoning_search_steps` | **0** |
+| `reasoning_get_session_outline` | **0** |
+| `reasoning_get_trace` (pre-existing, same tier) | **0** |
+| `reasoning_list_sessions` (pre-existing, same tier) | **0** |
+
+The write side works — 24 marks were recorded, 21 rows exist in
+`reasoning_step_marks`. **Every tool built to read them has never been
+called.** Marks are being written and never read, which is the sharpest
+possible statement of the gap: the design's "let the agent stay in control of
+what matters" principle succeeded, while its "read-oriented audit helpers"
+principle has no demonstrated consumer.
+
+**Root cause, diagnosed elsewhere and not re-derived here:** auto-recall at
+session start already returns a compact snippet of each related memory, which
+covers most "what was concluded and why" needs without replaying a trace. The
+audit tier competes with a cheaper automatic path that already works. See
+§8.1 and §8.1.1 of
+[2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md),
+where the reasoning read/audit tier is recorded as an open removal candidate.
+
+**How to use this document now:** as the historical record of why the audit
+layer exists and how it was built — useful if you need to modify or remove it.
+**Not** as evidence that more audit tooling is warranted. Its own Risk 3
+("weak marker adoption") anticipated part of this; what it did not anticipate
+was marks being adopted while the readers stayed at zero.
 
 ## Goal
 

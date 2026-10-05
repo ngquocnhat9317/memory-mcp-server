@@ -55,6 +55,7 @@ test("runMigrations records all registered migrations after creating the baselin
         "0003_reasoning_steps_fts",
         "0004_tool_usage_events",
         "0005_memory_workspace",
+        "0006_workspace_identity",
       ]
     );
   } finally {
