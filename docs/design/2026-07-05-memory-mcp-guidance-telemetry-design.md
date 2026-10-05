@@ -1,11 +1,92 @@
 # Memory MCP Guidance And Telemetry Design
 
-> **Status**: Draft
-> **Last updated**: 2026-07-06
+> **Status**: ⚠️ **PARTIALLY SUPERSEDED — do not implement from this document as written.** See "Status vs. shipped reality" immediately below.
+> **Last updated**: 2026-08-07 (status block added; body below is the unmodified 2026-07-06 draft)
 > **Created by**: Codex
 > **Primary sources**: `src/db.ts`, `src/migrations/index.ts`, `src/migrations/*.ts`, `src/tools/memory.ts`, `src/tools/reasoning.ts`, `src/schemas/reasoning.ts`, `AGENTS.md`, runtime data in the local SQLite database
 > **Overall confidence**: Medium
-> **Version**: v0.1
+> **Version**: v0.2 (status block only — no design content changed)
+
+---
+
+## Status vs. shipped reality (added 2026-08-07)
+
+A spec review on 2026-08-07 (session `sess_3a7191e2`, memory `mem_c80ca0fe`)
+compared every proposal in this document against the actual code. The
+telemetry half shipped close to this design. **The guidance half did not**,
+and two items never shipped at all. The body below is left unmodified as the
+historical design record — this block is the correction layer.
+
+### Shipped, and matching this design
+
+- `tool_usage_events` table and the best-effort event recorder — migration
+  `0004_tool_usage_events`, `src/tools/telemetry.ts` (§8.1, §13 Phase 1–2).
+- `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`
+  (§7.2–7.4, Phase 4).
+- `memory_record_usage_feedback` (§7.5, Phase 5) — with one change this
+  document did not anticipate: successful feedback is recorded **regardless**
+  of `MEMORY_TELEMETRY`, because a later spec reclassified it as a learning
+  signal rather than diagnostics. See §9.1 of
+  [2026-07-11-spec-mcp-value-improvement.md](./2026-07-11-spec-mcp-value-improvement.md).
+- Privacy rules (§11.1/§11.2) — `input_shape`/`output_shape` sanitization is
+  live and holds.
+
+### Shipped, but NOT as designed here — §7.1 is the big one
+
+| Aspect | This document (§7.1) | What actually shipped (`src/tools/usage-guide.ts`) |
+|---|---|---|
+| Tool name | `memory_get_usage_guide` | **`get_usage_guide`** |
+| Input | `task_type` enum (8 values), `has_prior_context_query`, `is_sensitive_task`, `mcp_version` | **only** `agent_id`, `client_name`, `client_version` |
+| Output | `recommended_flow[]`, `first_tool`, `required_tools[]`, `avoid_tools[]`, `save_policy{}`, `telemetry_notice` | **raw `GUIDELINES.md` markdown** plus `guide_version`, `mcp_version`, `path`, `format` |
+| Model | Server computes per-task-type advice | Server serves one versioned document; the agent decides |
+
+This is not a partial implementation — it is a different design. The shipped
+approach makes `GUIDELINES.md` the single versioned source of truth (locked by
+`src/__tests__/docs-consistency.test.ts` and the `guide_version` assertion in
+`reasoning-audit-tools.test.ts`), rather than encoding a decision table in
+code. **Anything in §7.1, §9.2's `memory_get_usage_guide` row, or §10.2's
+"is the new guidance actually being called" metric that assumes the
+task-type-aware contract is obsolete.**
+
+### Never shipped
+
+- **`guidance_versions` table (§8.2) and migration `0005_guidance_versions`
+  (§12.1).** Not built — and the `0005` slot it reserved was taken by
+  `0005_memory_workspace` (workspace-aware recall, v1.3.0). The migration
+  numbering in §12.1 is therefore not just unbuilt but unusable as written;
+  any future guidance-registry migration needs a new number. Note §8.2 itself
+  called this table optional for v1, so this is a deferral, not a regression.
+- **Retention and cleanup (§11.3, §13 Phase 6).** No retention config, no
+  cleanup tool, no startup cleanup — verified by grep across `src/`.
+  §11.3 required that *"if no cleanup tool is implemented in v1, the
+  implementation spec must state clearly that telemetry will grow DB size over
+  time."* **That statement was never written anywhere.** Stating it here now:
+  **`tool_usage_events` grows without bound; nothing prunes it.** Current
+  scale is small (296 rows as of 2026-08-07, ~3 weeks of daily dogfooding), so
+  this is not urgent — but it is an accepted, previously-undocumented
+  liability, not a solved problem. **Whether to build cleanup or formally
+  accept unbounded growth is an open owner decision** (see the open-questions
+  correction below).
+
+### Open questions (§16) and unconfirmed points (§18) — corrected status
+
+The table in §16 still reads as five open questions. Shipped code answers
+three of them:
+
+| ID | Question | Actual status (2026-08-07) |
+|---|---|---|
+| Q-001 | `mcp_version` from package version or build-time constant? | **Resolved by code** — `MCP_VERSION` constant in `src/constants.ts`, kept in sync with `package.json` by the release process in `CLAUDE.md`. |
+| Q-002 | Is a config to fully disable telemetry needed? | **Resolved by code** — `MEMORY_TELEMETRY` exists and defaults to **off**, i.e. stricter than this document proposed (opt-in, not opt-out). |
+| Q-003 | Should `client_name` be mandatory? | **Resolved by code** — optional, as this document recommended. |
+| Q-004 | Is feedback called by the agent or the client? | **Resolved by design** — the agent, and primarily via `used_memory_ids` on `reasoning_complete_session` rather than a standalone call, precisely to avoid depending on agent discipline. |
+| Q-005 | What is the default retention? | **STILL OPEN** — no retention exists. This is the one genuinely unresolved question in this document. |
+
+§18's Unconfirmed items map the same way: #1 (retention) and #4's successor
+are covered by Q-005/Q-002 above; #2 (`guidance_versions` needed in v1?) is
+answered *no* by six weeks of shipping without it; #3 (who calls feedback) is
+Q-004.
+
+---
 
 ## 1. Goals
 

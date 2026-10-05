@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.3 (2026-10-05)
+
+Theme: recall that respects project identity — fixes `reasoning_start_session` recalling other projects' memories, stale memories, and near-zero-relevance memories from the same project. Design: [`docs/design/2026-10-05-spec-recall-workspace-identity.md`](docs/design/2026-10-05-spec-recall-workspace-identity.md).
+
+### Added
+
+- Optional `workspace` input on `reasoning_start_session` and `memory_save`; `reasoning_start_session` returns the resolved `workspace` and a `workspace_warning` when it is unknown.
+- Migration `0006_workspace_identity`: `reasoning_sessions.workspace`; legacy `memories.workspace` values of `/` and the home directory are set to NULL (unknown).
+
+### Changed
+
+- `getWorkspace` treats `/`, the home directory and empty as unknown instead of as a project.
+- Auto-recall: other projects' non-preference memories need a near-complete title match; `preference` memories bypass that gate; one blended score (coverage 0.45, BM25 0.20, workspace 0.30, recency 0.05) replaces the lexicographic comparator; memories reported `stale`/`unsafe_to_use` are excluded; generic title words (fix, bug, update, …) no longer count as matches.
+- **Behavior change:** the "serendipity lifeline" is removed — when nothing is relevant, `related_memories` is `[]`.
+- `GUIDELINES.md` `2026-07-18.v7` → `2026-10-05.v8`: agents are told to pass `workspace`, and an empty `related_memories` is described as normal.
+
 ## 1.3.2 (2026-07-18)
 
 Theme: guide-contract alignment — `GUIDELINES.md`, tool descriptions, and server instructions now match what the code actually does, locked in by a new docs-consistency test; conflict-check and step-marking guidance tightened from soft suggestions into concrete triggers after live-store telemetry showed near-zero adoption.

@@ -1,6 +1,6 @@
 # Architecture
 
-Version: 1.3.2
+Version: 1.3.3
 
 This document describes how `memory-mcp-server` is built, for contributors
 working inside this repository. For install/usage instructions see
@@ -107,7 +107,7 @@ Supporting modules used across layers:
 | `src/tools/usage-guide.ts` | `get_usage_guide` — serves the versioned `GUIDELINES.md` content and records a telemetry event for the read |
 | `src/schemas/memory.ts` | zod input contracts for every `memory_*` tool |
 | `src/schemas/reasoning.ts` | zod input contracts for every `reasoning_*` tool |
-| `src/migrations/0001_initial.ts` … `0005_memory_workspace.ts` | Individual, ordered schema migrations (see Section 5) |
+| `src/migrations/0001_initial.ts` … `0006_workspace_identity.ts` | Individual, ordered schema migrations (see Section 5) |
 | `src/migrations/index.ts` | `runMigrations(db)` — applies pending migrations in order inside a transaction per migration, tracked in `schema_migrations` |
 | `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`) |
 
@@ -117,7 +117,7 @@ The typical task lifecycle, and where each step reads or writes the database:
 
 1. **`reasoning_start_session(title, ...)`** — writes a new row to
    `reasoning_sessions`. Before returning, it **reads** `memories` (full-text
-   search against `title`, BM25-ranked, workspace-aware — see
+   search against `title`, scored by a blend of term coverage, BM25, workspace and recency, with a cross-project gate and no best-effort fallback — see
    `related_memories` in the response) and **reads+writes**
    `reasoning_sessions` again to auto-abandon any `in_progress` session older
    than `MEMORY_SESSION_TTL_HOURS`.
@@ -148,8 +148,8 @@ SQLite tables, all created/altered by the migrations in `src/migrations/`:
 
 | Table | Added by | Purpose |
 | --- | --- | --- |
-| `memories` | `0001_initial` (workspace column added by `0005_memory_workspace`) | Durable memory rows: `type`, `content`, `importance`, `tags`, `agent_id`, `source` (session provenance), `workspace` |
-| `reasoning_sessions` | `0001_initial` | One row per task-level reasoning session: `title`, `status`, `conclusion`, timestamps |
+| `memories` | `0001_initial` (workspace column added by `0005_memory_workspace`; legacy `/` and home-directory values nulled by `0006_workspace_identity`) | Durable memory rows: `type`, `content`, `importance`, `tags`, `agent_id`, `source` (session provenance), `workspace` |
+| `reasoning_sessions` | `0001_initial` (workspace column added by `0006_workspace_identity`) | One row per task-level reasoning session: `title`, `status`, `conclusion`, `workspace` (copied to persisted conclusions), timestamps |
 | `reasoning_steps` | `0001_initial` | Ordered steps within a session: `thought`/`action`/`observation`, `step_number` |
 | `reasoning_step_marks` | `0002_reasoning_step_marks` | One mark per (step, mark type) — enforces a single row per step/type pair |
 | `tool_usage_events` | `0004_tool_usage_events` | Diagnostics/telemetry events (gated by `MEMORY_TELEMETRY`) and usage-feedback events (always recorded) |

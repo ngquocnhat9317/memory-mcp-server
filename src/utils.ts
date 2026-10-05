@@ -46,18 +46,43 @@ function ftsTerms(raw: string): string[] {
 }
 
 /**
+ * Generic task words and function words. They match nearly every memory,
+ * so counting them toward the recall floor lets unrelated memories in.
+ * Includes a few common Vietnamese words (titles are often mixed-language).
+ */
+const RECALL_STOPWORDS = new Set([
+  "fix", "fixes", "fixing", "add", "adds", "adding", "update", "updates",
+  "updating", "improve", "improves", "improving", "implement",
+  "implementing", "review", "investigate", "investigating", "debug",
+  "debugging", "bug", "bugs", "issue", "issues", "task", "tasks",
+  "the", "and", "for", "with", "from", "into", "that", "this", "are", "not",
+  "không", "của", "cho", "với", "các", "những", "một", "cải", "tiến",
+  "sửa", "lỗi", "thêm",
+]);
+
+function bareToken(token: string): string {
+  return token.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+}
+
+/**
  * Term preparation for auto-recall only. Drops noise tokens (<=2 chars,
- * the main source of one-word junk matches) and caps the count so long
- * titles stay cheap. memory_search keeps raw ftsTerms behavior — an
- * explicit query is the caller's intent.
+ * the main source of one-word junk matches) and generic stopwords, and caps
+ * the count so long titles stay cheap. If filtering would leave nothing, it
+ * falls back to the unfiltered tokens. memory_search keeps raw ftsTerms
+ * behavior — an explicit query is the caller's intent.
  */
 export function toRecallTerms(raw: string): string[] {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   const significant = tokens.filter((token) => token.length > 2);
+  const topical = significant.filter(
+    (token) => !RECALL_STOPWORDS.has(bareToken(token))
+  );
+  const base =
+    topical.length > 0 ? topical : significant.length > 0 ? significant : tokens;
   // Dedupe case-insensitively: a repeated word must not raise the
   // match floor or double-count as two matched terms.
   const seen = new Set<string>();
-  const chosen = (significant.length > 0 ? significant : tokens)
+  const chosen = base
     .filter((token) => {
       const key = token.toLowerCase();
       if (seen.has(key)) return false;
