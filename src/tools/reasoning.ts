@@ -29,7 +29,13 @@ import type {
   ReasoningSessionRow,
   ReasoningStepRecord,
 } from "../types.js";
-import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS, getWorkspace } from "../constants.js";
+import {
+  AUTO_RECALL_LIMIT,
+  RECALL_RECENCY_DAYS,
+  RECALL_WEIGHTS,
+  SESSION_TTL_HOURS,
+  getWorkspace,
+} from "../constants.js";
 import {
   handleToolError,
   newId,
@@ -246,22 +252,6 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
 
 /** Candidate pool fetched by BM25 before the gate/score pass. */
 const RECALL_CANDIDATE_POOL = 50;
-
-/**
- * Blended auto-recall score weights — see
- * docs/design/2026-10-05-spec-recall-workspace-identity.md §3.4.
- * Relevance (coverage + bm25) is the largest block; workspace only orders
- * candidates that already passed the cross-project gate.
- */
-const RECALL_WEIGHTS = {
-  coverage: 0.45,
-  bm25: 0.2,
-  workspace: 0.3,
-  recency: 0.05,
-} as const;
-
-/** recency = 1 / (1 + age_days / RECALL_RECENCY_DAYS). */
-const RECALL_RECENCY_DAYS = 60;
 
 function recallRelatedMemories(
   database: DatabaseSync,
