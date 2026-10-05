@@ -57,6 +57,13 @@ export const MemorySaveInputSchema = z
       .describe(
         "Optional identifier for the agent/persona this memory belongs to, for multi-agent setups."
       ),
+    workspace: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        "Absolute path of the project directory this memory belongs to. Pass your current working directory so recall can prefer this project's memories. If omitted the server uses its own working directory; '/' and the home directory count as unknown."
+      ),
     metadata: z
       .record(z.unknown())
       .optional()
