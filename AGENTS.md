@@ -37,7 +37,7 @@ Primary source-of-truth paths:
 ## Docs
 
 - Do not copy `README.md` setup guidance into this file.
-- `CLAUDE.md` is a mirror of this file — apply any edit here to `CLAUDE.md` as well.
+- `CLAUDE.md` only imports this file (`@AGENTS.md`) — edit the rules here, not there.
 
 ## Docs Conventions
 
