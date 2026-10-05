@@ -2,17 +2,19 @@
 
 ## 1.3.3 (2026-10-05)
 
-Theme: recall that respects project identity — fixes `reasoning_start_session` recalling other projects' memories, stale memories, and near-zero-relevance memories from the same project. Design: [`docs/design/2026-10-05-spec-recall-workspace-identity.md`](docs/design/2026-10-05-spec-recall-workspace-identity.md).
+Theme: recall that respects project identity — fixes `reasoning_start_session` recalling other projects' memories, stale memories, and near-zero-relevance memories from the same project — and brings `memory_search` onto the same blended ranking, so multi-term searches stop returning nothing. Design: [`docs/design/2026-10-05-spec-recall-workspace-identity.md`](docs/design/2026-10-05-spec-recall-workspace-identity.md), [`docs/design/2026-08-07-spec-zero-mem-inspired-recall.md`](docs/design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A′.
 
 ### Added
 
 - Optional `workspace` input on `reasoning_start_session` and `memory_save`; `reasoning_start_session` returns the resolved `workspace` and a `workspace_warning` when it is unknown.
 - Migration `0006_workspace_identity`: `reasoning_sessions.workspace`; legacy `memories.workspace` values of `/` and the home directory are set to NULL (unknown).
+- Recall eval base (WI-11): a labelled fixture (`src/__tests__/fixtures/recall-eval-cases.ts`) and suite (`src/__tests__/recall-eval.test.ts`) that drive the real `reasoning_start_session` and `memory_search` tools to lock auto-recall and search ranking behavior.
 
 ### Changed
 
 - `getWorkspace` treats `/`, the home directory and empty as unknown instead of as a project.
 - Auto-recall: other projects' non-preference memories need a near-complete title match; `preference` memories bypass that gate; one blended score (coverage 0.45, BM25 0.20, workspace 0.30, recency 0.05) replaces the lexicographic comparator; memories reported `stale`/`unsafe_to_use` are excluded; generic title words (fix, bug, update, …) no longer count as matches.
+- **Behavior change:** `memory_search` matches with OR instead of implicit AND, with the same coverage floor as auto-recall (3+ distinct terms need at least 2 matches; fewer need 1; punctuation-only tokens such as `-` are ignored). Results are ranked by the blended score shared with auto-recall (coverage 0.45, BM25 0.20, recency 0.05, no workspace term), computed in SQL so `limit`/`offset` pagination is stable (ties break on importance, `updated_at`, then id). `RECALL_WEIGHTS` and `RECALL_RECENCY_DAYS` moved to `src/constants.ts`. Compatibility: multi-term queries that previously returned nothing because one term was absent now return partial matches, ranked below full matches.
 - **Behavior change:** the "serendipity lifeline" is removed — when nothing is relevant, `related_memories` is `[]`.
 - `GUIDELINES.md` `2026-07-18.v7` → `2026-10-05.v8`: agents are told to pass `workspace`, and an empty `related_memories` is described as normal.
 

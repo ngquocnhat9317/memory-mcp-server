@@ -109,7 +109,7 @@ Supporting modules used across layers:
 | `src/schemas/reasoning.ts` | zod input contracts for every `reasoning_*` tool |
 | `src/migrations/0001_initial.ts` … `0006_workspace_identity.ts` | Individual, ordered schema migrations (see Section 5) |
 | `src/migrations/index.ts` | `runMigrations(db)` — applies pending migrations in order inside a transaction per migration, tracked in `schema_migrations` |
-| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`) |
+| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`, and the recall eval suite `recall-eval` with its fixture in `fixtures/recall-eval-cases.ts`) |
 
 ## 4. Data Flow
 
@@ -137,6 +137,10 @@ The typical task lifecycle, and where each step reads or writes the database:
 `memory_save` / `memory_search` / `memory_list` / `memory_get` /
 `memory_update` / `memory_delete` operate directly on `memories` outside any
 reasoning session, for durable facts that don't need a task trace.
+`memory_search` matches any query term (OR) subject to a coverage floor (3+
+distinct terms need at least 2 matches) and ranks by term coverage, BM25 and
+recency using the weights shared with auto-recall, computed in SQL so
+`limit`/`offset` pagination is stable.
 
 Every tool call that isn't pure usage-feedback also **writes** one row to
 `tool_usage_events` when `MEMORY_TELEMETRY=on` (diagnostics only — never

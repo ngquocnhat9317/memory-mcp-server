@@ -46,6 +46,28 @@ function ftsTerms(raw: string): string[] {
 }
 
 /**
+ * memory_search terms: the same quoted-prefix terms as toFtsQuery, deduped
+ * case-insensitively so a repeated word cannot inflate the coverage floor.
+ * Punctuation-only tokens ("-", "–", "/") never match anything, so they are
+ * dropped rather than counted toward the floor. No stopword or length
+ * filtering — an explicit query is the caller's intent.
+ */
+export function toSearchTerms(raw: string): string[] {
+  const seen = new Set<string>();
+  const words = raw
+    .trim()
+    .split(/\s+/)
+    .filter((token) => /[\p{L}\p{N}]/u.test(token))
+    .join(" ");
+  return ftsTerms(words).filter((term) => {
+    const key = term.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Generic task words and function words. They match nearly every memory,
  * so counting them toward the recall floor lets unrelated memories in.
  * Includes a few common Vietnamese words (titles are often mixed-language).
@@ -68,8 +90,8 @@ function bareToken(token: string): string {
  * Term preparation for auto-recall only. Drops noise tokens (<=2 chars,
  * the main source of one-word junk matches) and generic stopwords, and caps
  * the count so long titles stay cheap. If filtering would leave nothing, it
- * falls back to the unfiltered tokens. memory_search keeps raw ftsTerms
- * behavior — an explicit query is the caller's intent.
+ * falls back to the unfiltered tokens. memory_search uses toSearchTerms (no
+ * filtering) — an explicit query is the caller's intent.
  */
 export function toRecallTerms(raw: string): string[] {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
