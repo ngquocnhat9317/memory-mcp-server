@@ -107,30 +107,18 @@ test("auto-recall filters one-word matches below the quality floor", async () =>
   }
 });
 
-test("auto-recall breaks equal-relevance ties by importance then recency", async () => {
+test("auto-recall breaks equal-relevance, equal-recency ties by importance", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("wave3-recall-ties");
 
   try {
-    // Identical content = identical bm25 rank, so only tie-breaks decide.
     const content = "deploy pipeline rollback procedure for staging";
-    insertMemory(toolDb, {
-      id: "mem_old_low",
-      content,
-      importance: 4,
-      updatedAt: "2026-07-01T00:00:00.000Z",
-    });
-    insertMemory(toolDb, {
-      id: "mem_top",
-      content,
-      importance: 5,
-      updatedAt: "2026-07-01T00:00:00.000Z",
-    });
-    insertMemory(toolDb, {
-      id: "mem_new_low",
-      content,
-      importance: 4,
-      updatedAt: "2026-07-05T00:00:00.000Z",
-    });
+    for (const [id, importance] of [
+      ["mem_low", 3],
+      ["mem_top", 5],
+      ["mem_mid", 4],
+    ] as const) {
+      insertMemory(toolDb, { id, content, importance });
+    }
 
     const started = await tools.reasoning_start_session.handler({
       title: "deploy pipeline rollback staging",
@@ -141,7 +129,70 @@ test("auto-recall breaks equal-relevance ties by importance then recency", async
     };
     assert.deepEqual(
       payload.related_memories.map((row) => row.id),
-      ["mem_top", "mem_new_low", "mem_old_low"]
+      ["mem_top", "mem_mid", "mem_low"]
+    );
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+test("auto-recall prefers the more recently updated of two equally relevant memories", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("wave3-recall-recency");
+
+  try {
+    const content = "deploy pipeline rollback procedure for staging";
+    insertMemory(toolDb, {
+      id: "mem_old",
+      content,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    insertMemory(toolDb, {
+      id: "mem_fresh",
+      content,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const started = await tools.reasoning_start_session.handler({
+      title: "deploy pipeline rollback staging",
+    });
+    const payload = started.structuredContent as {
+      related_memories: Array<{ id: string }>;
+    };
+    assert.deepEqual(
+      payload.related_memories.map((row) => row.id),
+      ["mem_fresh", "mem_old"]
+    );
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+test("recency never outranks relevance in auto-recall (AC-8)", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("wave3-recall-relevance-first");
+
+  try {
+    insertMemory(toolDb, {
+      id: "mem_old_strong",
+      content: "deploy pipeline rollback procedure for staging",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    insertMemory(toolDb, {
+      id: "mem_fresh_weak",
+      content: "deploy pipeline weekly cadence notes",
+      updatedAt: new Date().toISOString(),
+    });
+
+    const started = await tools.reasoning_start_session.handler({
+      title: "deploy pipeline rollback staging",
+    });
+    const payload = started.structuredContent as {
+      related_memories: Array<{ id: string }>;
+    };
+    assert.deepEqual(
+      payload.related_memories.map((row) => row.id),
+      ["mem_old_strong", "mem_fresh_weak"]
     );
   } finally {
     toolDb.close();
