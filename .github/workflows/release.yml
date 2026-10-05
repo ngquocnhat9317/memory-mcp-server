@@ -1,0 +1,73 @@
+# Publishes a tagged release to npm and creates the GitHub Release.
+#
+# To release: bump versions per the "Release Process" in AGENTS.md, merge to
+# master, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+#
+# One-time setup — npm Trusted Publishing, so no NPM_TOKEN secret exists:
+#   npmjs.com -> @nhatnguyen9317/memory-mcp-server -> Settings -> Trusted
+#   Publisher -> GitHub Actions, with user ngquocnhat9317, repository
+#   memory-mcp-server, workflow filename release.yml.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm Trusted Publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - name: Verify release
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          constant_version="$(sed -n 's/^export const MCP_VERSION = "\(.*\)";$/\1/p' src/constants.ts)"
+          if [ "$package_version" != "$version" ]; then
+            echo "::error::package.json version $package_version does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [ "$constant_version" != "$version" ]; then
+            echo "::error::MCP_VERSION in src/constants.ts is '$constant_version', expected $version"
+            exit 1
+          fi
+          if ! grep -q "^## ${version//./\\.} " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' entry"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::$GITHUB_REF_NAME is not on master; release tags must point at a commit merged to master"
+            exit 1
+          fi
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "::error::$name@$version is already published to npm"
+            exit 1
+          fi
+      - run: npm test
+      - run: npm publish --provenance --access public
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## /{p=($2==v);next} p' CHANGELOG.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag

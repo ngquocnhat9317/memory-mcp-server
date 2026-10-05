@@ -57,6 +57,7 @@ When bumping the package version, update in this order, in the same change:
 5. `GUIDELINES.md` `Version:` line, only if agent-facing behavior changed.
 6. Run `npm run build && npm test`.
 7. Move the relevant row from Planned to Shipped in `docs/roadmap.md`.
+8. After the change is merged to `master`, publish by pushing a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. `.github/workflows/release.yml` verifies the tag against `package.json`, `MCP_VERSION` and `CHANGELOG.md`, runs the tests, publishes to npm (Trusted Publishing, no token) and creates the GitHub Release. Do not run `npm publish` by hand.
 
 ## Version-Sync Conventions
 
