@@ -38,7 +38,6 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          name="$(node -p "require('./package.json').name")"
           package_version="$(node -p "require('./package.json').version")"
           constant_version="$(sed -n 's/^export const MCP_VERSION = "\(.*\)";$/\1/p' src/constants.ts)"
           if [ "$package_version" != "$version" ]; then
@@ -57,12 +56,29 @@ jobs:
             echo "::error::$GITHUB_REF_NAME is not on master; release tags must point at a commit merged to master"
             exit 1
           fi
-          if npm view "$name@$version" version >/dev/null 2>&1; then
-            echo "::error::$name@$version is already published to npm"
+      - run: npm test
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="$(node -p "require('./package.json').name")"
+          # Skip instead of failing when this same commit is already published, so
+          # a re-run can finish the steps after a partial failure (e.g. npm
+          # published but the GitHub Release did not).
+          err="$RUNNER_TEMP/npm-view.err"
+          if published_head="$(npm view "$name@$version" gitHead 2>"$err")"; then
+            if [ "$published_head" != "$GITHUB_SHA" ]; then
+              echo "::error::$name@$version is already on npm from commit '${published_head:-unknown}', not $GITHUB_SHA"
+              exit 1
+            fi
+            echo "$name@$version is already published from this commit; skipping"
+          elif grep -q E404 "$err"; then
+            npm publish --provenance --access public
+          else
+            cat "$err" >&2
+            echo "::error::could not check npm for $name@$version"
             exit 1
           fi
-      - run: npm test
-      - run: npm publish --provenance --access public
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,4 +86,14 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '/^## /{p=($2==v);next} p' CHANGELOG.md > release-notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
+          # A release published from the GitHub UI creates the tag itself, so
+          # the release (or a draft of it) can already exist by the time this
+          # step runs. Look it up in the full list, which includes drafts; the
+          # REST by-tag endpoint (releases/tags/{tag}) only returns published ones.
+          release_ids="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")"
+          if [ -n "$release_ids" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/${release_ids%%$'\n'*}" \
+              -f name="$GITHUB_REF_NAME" -F body=@release-notes.md -F draft=false >/dev/null
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
+          fi
