@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Doc version | 0.2 (Draft — awaiting owner approval before coding; 0.1 was the Vietnamese draft) |
+| Doc version | 0.3 (Shipped in v1.3.0; OQ-B's forward-looking note reduced to a pointer on 2026-08-07 — see §10) |
 | Date | 2026-07-12 |
 | Relation to main spec | Amendment to [2026-07-11-spec-mcp-value-improvement.md](./2026-07-11-spec-mcp-value-improvement.md) — same release, v1.3.0 (not yet published) |
 | Work items | WI-8 (F1 — recall quality floor) · WI-9 (F2 — workspace-aware recall + tag hygiene) |
@@ -174,6 +174,14 @@ Each record costs ~250–400 input tokens (snippet + tags + source). Cutting 2 j
 
 - **OQ-A — RESOLVED: 1-record fallback.** When nothing clears the floor, return the single best-ranked match (serendipity lifeline, still cuts ⅔ of the tokens).
 - **OQ-B — RESOLVED: `workspace_priority` below `matched_terms`.** Relevance stays the main course. Owner note: effectiveness will be evaluated in real use first; based on that evidence, a proper **scoring mechanism is planned for v1.4.0** (connects with the main spec's §9 evidence-gated Wave 4 — a blended score would fold matched-terms, workspace, BM25, and possibly used-count into one formula instead of lexicographic ordering).
+
+  > **Ownership moved 2026-08-07.** The blended-scoring work described in this
+  > note is no longer specified here. It is owned by Option A in
+  > [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md)
+  > §2, which absorbed this note's constraint as **C-1: raw relevance stays the
+  > top-weighted term** (the WI-1 lesson). A 2026-08-07 spec review found the
+  > same idea owned by three documents at once; this note is now a pointer, not
+  > a specification. Design or implement it from Option A, not from here.
 - **OQ-C — RESOLVED: as proposed.** Dropping ≤2-character terms is the only junk-term control for v1.3.0; no stopword list.
 - **FR-9.4 amendment (implementation detail):** workspace is read at call time via a `getWorkspace()` helper (env first, `process.cwd()` fallback) instead of a module-load constant — same pattern as `isTelemetryEnabled()`, trivially testable, no behavioral difference for real servers.
 
@@ -213,5 +221,7 @@ WI-8 + WI-9 as one commit series on feat/v1.3.0-wave3, still version 1.3.0 (unpu
 
 ## 10. Revision history
 
+- **0.4 (2026-10-05):** Follow-up shipped in 1.3.3 — see [2026-10-05-spec-recall-workspace-identity.md](./2026-10-05-spec-recall-workspace-identity.md): `/` and home are treated as unknown workspaces, cross-project recall is gated, the "serendipity lifeline" from WI-8 is removed, and auto-recall uses a blended score instead of the lexicographic order specified here. The soft-preference principle (no hard filter) is unchanged.
+- **0.3 (2026-08-07):** Spec-review pass (session `sess_3a7191e2`). OQ-B's forward-looking blended-scoring note reduced to a pointer — that work is now owned solely by Option A in [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md), which absorbed OQ-B's relevance-first constraint as C-1. No change to anything this spec actually shipped (WI-8/WI-9 are live in v1.3.0 and untouched).
 - **0.2 (2026-07-12):** Rewritten in English per owner request. Added tag-hygiene requirement (FR-9.7, AC-9.6, R-6): tags must not carry workspace/project names now that the server stamps workspace automatically — includes GUIDELINES + `memory_save` description updates.
 - **0.1 (2026-07-12):** Initial Vietnamese draft — F1 quality floor, F2 workspace soft preference, token impact estimate, OQ-A/B/C.

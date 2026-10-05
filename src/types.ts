@@ -55,6 +55,7 @@ export interface ReasoningSessionRow {
   agent_id: string | null;
   status: string;
   conclusion: string | null;
+  workspace: string | null;
   created_at: string;
   updated_at: string;
 }

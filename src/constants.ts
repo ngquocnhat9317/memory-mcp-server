@@ -3,7 +3,7 @@ import os from "node:os";
 
 /** Max characters returned in a single tool response before truncation. */
 export const CHARACTER_LIMIT = 25000;
-export const MCP_VERSION = "1.3.2";
+export const MCP_VERSION = "1.3.3";
 /**
  * Diagnostics-event recording is opt-in: set MEMORY_TELEMETRY=on to enable.
  * Read at call time so tests and long-lived processes can toggle it.
@@ -40,15 +40,58 @@ export const DB_PATH =
   process.env.MEMORY_DB_PATH ??
   path.join(os.homedir(), ".memory-mcp-server", "memory.db");
 
+function stripTrailingSeparators(value: string): string {
+  let result = value.trim();
+  while (result.length > 1 && /[\\/]$/.test(result)) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
 /**
- * Workspace identity for memory scoping. Claude Code/Codex launch the MCP
- * server inside the project directory, so cwd identifies the project;
- * MEMORY_WORKSPACE pins it explicitly when a client launches elsewhere.
- * Read at call time (same pattern as isTelemetryEnabled) for testability.
+ * Normalizes a workspace path: trims it and strips trailing separators.
+ * Returns null ("unknown") for values that cannot identify a project —
+ * empty, "/", and the home directory. Desktop clients launch the server
+ * from those, and treating them as a project merges unrelated projects.
  */
-export function getWorkspace(): string {
-  return process.env.MEMORY_WORKSPACE ?? process.cwd();
+export function normalizeWorkspace(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const value = stripTrailingSeparators(raw);
+  if (value === "" || value === "/") return null;
+  if (value === stripTrailingSeparators(os.homedir())) return null;
+  return value;
+}
+
+/**
+ * Workspace identity for memory scoping, or null when unknown. Precedence:
+ * an explicit value passed by the agent (it always knows its project),
+ * then MEMORY_WORKSPACE, then process.cwd() — Claude Code/Codex launch the
+ * server inside the project, desktop apps often do not. Read at call time
+ * (same pattern as isTelemetryEnabled) for testability.
+ */
+export function getWorkspace(explicit?: string): string | null {
+  return normalizeWorkspace(
+    explicit?.trim() || process.env.MEMORY_WORKSPACE || process.cwd()
+  );
 }
 
 export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 200;
+
+/**
+ * Blended auto-recall score weights — see
+ * docs/design/2026-10-05-spec-recall-workspace-identity.md §3.4.
+ * Relevance (coverage + bm25) is the largest block; workspace only orders
+ * candidates that already passed the cross-project gate.
+ */
+export const RECALL_WEIGHTS = {
+  coverage: 0.45,
+  bm25: 0.2,
+  workspace: 0.3,
+  recency: 0.05,
+} as const;
+
+/** recency = 1 / (1 + age_days / RECALL_RECENCY_DAYS). */
+export const RECALL_RECENCY_DAYS = 60;

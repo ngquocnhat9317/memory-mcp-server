@@ -1,6 +1,6 @@
 # Memory MCP Guidelines
 
-Version: 2026-07-18.v7
+Version: 2026-10-05.v8
 
 This file is the single source of truth for how an agent should use this MCP.
 It is organized around the three moments of a task where this MCP matters.
@@ -19,10 +19,19 @@ Tool schemas and descriptions are the source of truth for parameter contracts
      (Examples: any bug hunt, any change touching more than one file.)
      The title doubles as the recall query — favor concrete keywords
      (component, module, error names) over generic phrasing.
+     Also pass `workspace` — the absolute path of the project directory you
+     are working in. The server's own working directory is often `/` or your
+     home directory when a desktop app launched it; those count as "unknown
+     project" and turn project scoping off. If the response shows
+     `workspace: null` with a `workspace_warning`, pass `workspace` on this
+     and later calls (`reasoning_start_session`, `memory_save`).
 2. Read what the server hands back — this is free recall, act on it:
    - `related_memories`: saved knowledge matched to your title, ranked by
-     text relevance and biased toward your current workspace. Weak one-word
-     matches are filtered out, so an empty or short list is normal. Review
+     a blend of term coverage, text relevance, workspace and recency.
+     Memories from other projects appear only when they match nearly your
+     whole title (user `preference` memories are the exception). Weak matches
+     are filtered out, so an empty list is normal — do not pad the title just
+     to get results. Review
      the snippets before working; fetch full content
      with `memory_get` if needed. Entries persisted from a past reasoning
      session carry a `source` field (`{session_id, session_title, created_at}`)
@@ -102,8 +111,9 @@ Durable memory:
 
 - `memory_save`: store durable facts, decisions, preferences, or summaries.
   Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put
-  workspace or project names in tags; the server records the workspace
-  automatically and prefers same-workspace memories at recall time
+  workspace or project names in tags. Pass `workspace` (your project
+  directory); if omitted the server records its own working directory (never
+  `/` or the home directory) and prefers same-workspace memories at recall time
 - `memory_search`: targeted recall by keyword, topic, or hypothesis
 - `memory_list`: recent or filtered browsing (when browsing beats searching)
 - `memory_get`: fetch one memory by exact id

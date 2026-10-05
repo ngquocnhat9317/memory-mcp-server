@@ -2,13 +2,13 @@
 
 | Field | Value |
 |---|---|
-| Document version | 0.3 (Draft — revision history in §13) |
-| Date | 2026-07-11 |
-| Current MCP version | 1.2.5 (`src/constants.ts:6`) |
-| Target MCP version | 1.3.0 (Wave 3) |
-| Next direction | 1.4.0 (Wave 4 — conditional candidate, only starts after the evidence gate in §9.3) |
+| Document version | 0.5 (Draft — revision history in §13; Wave 4 retargeted from v1.4.0 to v2.0.0 and evidence gate scored for the first time against live data (§9.3.1), both 2026-08-07) |
+| Date | 2026-07-11 (revised 2026-08-07) |
+| Current MCP version | 1.3.2 (`src/constants.ts:6`) |
+| Target MCP version | 1.3.0 (Wave 3, shipped) |
+| Next direction | **v2.0.0** (Wave 4 — conditional candidate, retargeted from v1.4.0; only starts after the evidence gate in §9.3. v1.4.0 itself is now occupied by the retargeted 1.3.5 work items plus Option A — see [2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md) and [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md)) |
 | Author | Claude (based on the owner's positioning brief) |
-| Scope | Wave 3 (v1.3.0): WI-1..3 code + WI-4..5 docs/growth · Wave 4 (v1.4.0): WI-6, WI-7 — candidates behind the gate (§9) |
+| Scope | Wave 3 (v1.3.0): WI-1..3 code + WI-4..5 docs/growth · Wave 4 (v2.0.0): WI-6, WI-7 — candidates behind the gate (§9), joined by Zero-Mem-inspired Options B/C |
 
 ---
 
@@ -271,9 +271,9 @@ Rationale for the order: WI-3 goes first because it is the precondition for *mea
 
 ---
 
-## 9. Direction for v1.4.0 (Wave 4) — turning feedback into recall fuel, unlocked by evidence
+## 9. Direction for v2.0.0 (Wave 4) — turning feedback into recall fuel, unlocked by evidence
 
-> **Status: conditional candidate — NOT a committed backlog.** Wave 4 starts only after v1.3.0 has been published, users have accumulated real memory stores through use, and the evidence gate in §9.3 opens. If the gate does not open, the items here are cancelled or replaced by the cheaper path (fallback branch, §9.3) — that is not a failure; that is the spec working as designed.
+> **Status: conditional candidate — NOT a committed backlog.** Wave 4 starts only after v1.3.0 has been published, users have accumulated real memory stores through use, and the evidence gate in §9.3 opens. If the gate does not open, the items here are cancelled or replaced by the cheaper path (fallback branch, §9.3) — that is not a failure; that is the spec working as designed. **Retargeted from v1.4.0 to v2.0.0 on 2026-08-07** (§13 revision 0.4) — the v1.4.0 slot now belongs to the retargeted v1.3.5 work plus Zero-Mem-inspired Option A; WI-6/WI-7 here are joined by Zero-Mem-inspired Options B and C ([2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md)) as v2.0.0 candidates, all still behind their respective evidence gates.
 
 ### 9.1. Settled framing: learning signal ≠ diagnostics
 
@@ -316,6 +316,62 @@ Measured after **4–6 weeks** of real v1.3.0 use (all read from the local `tool
 
 **Fallback branch — and the branch expected to happen:** if **G-a fails** (the most likely outcome, see risk 1 in §9.2), the real problem is the *feedback capture rate*, not ranking. The replacement item is then **WI-6b — fix the guidance**: update `GUIDELINES.md` and the AGENTS snippet in the README so agents remember to pass `used_memory_ids` at session close (with the version bump + test sync per repo rules). It costs about one percent of WI-6 and fixes the actual bottleneck. Only if G-a still fails after WI-6b has run for another 4–6-week cycle can one conclude the flywheel is not viable for this product.
 
+> **Superseded 2026-08-07 by the measurement in §9.3.1 — read that before
+> acting on the paragraph above.** The prediction that G-a would fail is
+> disproven, and **WI-6b is consequently obsolete**: it existed only to fix a
+> feedback-capture bottleneck that measurement shows does not exist.
+
+### 9.3.1. Gate scored against live data (2026-08-07) — first real measurement
+
+The 4–6 week window in §9.3 has now run. Scored from
+`~/.memory-mcp-server/memory.db` (296 `tool_usage_events` rows spanning
+2026-07-16 → 2026-08-07) during the spec review recorded in
+[2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md)
+§8.1.1:
+
+| # | Condition | Threshold | Measured | Status |
+|---|---|---|---:|---|
+| G-a | Cumulative `used` events | ≥ 20–30 | **54** | ✅ **Met** |
+| G-b | Memories with `used_count ≥ 2` | ≥ 5 | **14** | ✅ **Met** |
+| G-c | Concrete recall-quality complaints persisting despite BM25 | evidence exists | none recorded | ❌ Not met |
+| G-d | Eval suite (≥10 queries + expected orderings) written before tuning | mandatory | `src/__tests__/fixtures/` does not exist | ❌ Not met |
+
+**Gate status: 2 of 4. WI-6 stays closed** — the rule in §9.3 is "any
+condition missing → do not build", and that has not changed.
+
+**What did change, and why it matters:**
+
+1. **§9.2's risk 1 is disproven, not merely unconfirmed.** That risk argued
+   the feedback signal depends on agent discipline and therefore would not
+   accumulate — with a cited living proof of a compliant session producing
+   zero feedback events. At 54 events across 51 memories, the signal
+   accumulates fine through the automatic path (`used_memory_ids` on
+   `reasoning_complete_session`). The "never bet on agent discipline"
+   philosophy held: the capture that works is the one wired into an
+   event the agent must already call.
+2. **WI-6b is obsolete.** It was scoped exclusively to raise the capture
+   rate. The capture rate is not the bottleneck. Do not build it; do not
+   treat it as "the branch expected to happen" — that framing above is now
+   historical.
+3. **The remaining blocker is G-d, which is already scheduled.** G-d is
+   WI-11 (recall relevance eval base) in the v1.4.0 spec, and it is first in
+   that release's implementation order. Wave 4 is therefore one planned work
+   item away from being gate-eligible on three of four conditions — much
+   closer than this section implied before today.
+4. **G-c is unmet for a reason worth stating.** No recall-quality complaint
+   has been *recorded* anywhere. That is not the same as "recall quality is
+   fine" — it may equally mean nobody is capturing complaints. If WI-6 is
+   ever seriously considered, decide first whether G-c is measurable at all
+   in a ~0-external-user product, or whether it should be replaced by a
+   condition that can actually be observed.
+
+**Evidence caveat:** these numbers come from the owner's own dogfooding
+database, not from external users. This is consistent with how §8.1
+measured, but the gate's original wording ("real v1.3.0 use", "users have
+accumulated real memory stores") implied a user population that does not yet
+exist. Whether one operator's data is sufficient to open a gate designed for
+user evidence is an owner decision, not settled here.
+
 ### 9.4. WI-7 (further-out candidate) — Evidence-based store cleanup
 
 Idea: a memory recalled many times but always `ignored` or marked `stale` → a clear deletion candidate, replacing guesswork. Right direction, **but with an identified hidden gap**: knowing "recalled often but never used" requires recording recall events (the denominator) — which sits on the **diagnostics** side of the boundary (opt-in) per the §9.1 framing. That means WI-7 forces an explicit reopening of the OQ-4 boundary decision. Therefore: no gate is attached to WI-7 in this revision; consider it only after WI-6 has actually run and a concrete store-cleanup need has been recorded.
@@ -355,6 +411,34 @@ Wave 3 adds no new features — it makes the existing promise **hold as users st
 ---
 
 ## 13. Revision history
+
+### 0.5 — 2026-08-07 (evidence gate scored for the first time; WI-6b obsolete)
+
+From the same spec review as rev 0.4 (session `sess_3a7191e2`, memory
+`mem_c80ca0fe`), but a separate finding: the §9.3 gate had never actually
+been measured, and measuring it changed two conclusions.
+
+- **Added §9.3.1** — gate scored against 296 live `tool_usage_events`:
+  G-a **54** (≥20–30) ✅, G-b **14** (≥5) ✅, G-c ❌ (nothing recorded),
+  G-d ❌ (`src/__tests__/fixtures/` verified absent). Gate is 2/4, so WI-6
+  stays closed under §9.3's own rule.
+- **WI-6b marked obsolete.** §9.3 called a G-a failure "the most likely
+  outcome" and pre-wrote WI-6b to fix the feedback-capture rate. G-a passed
+  comfortably; the bottleneck WI-6b targets does not exist. §9.2's risk 1
+  (feedback depends on agent discipline, therefore will not accumulate) is
+  disproven for the automatic `used_memory_ids` path.
+- **Recorded that G-d is the only scheduled blocker left** — it is WI-11,
+  already first in the v1.4.0 implementation order.
+- **Flagged G-c as possibly unmeasurable** in a ~0-external-user product, and
+  the gate's "real user evidence" framing as unmet by dogfooding data. Both
+  left as owner decisions, not resolved here.
+
+No FR/AC changes; Wave 4 remains gated and unstarted.
+
+### 0.4 — 2026-08-07 (Wave 4 retargeted from v1.4.0 to v2.0.0)
+
+- **Owner decision:** the v1.4.0 slot is reassigned to the retargeted v1.3.5 work items (WI-10, WI-11, WI-13, WI-15) plus the new Option A (recency/temporal scoring) from [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md). Wave 4 (WI-6, WI-7 — this §9) moves to **v2.0.0**, joined at that same target by that spec's Options B (entity-context graph) and C (temporal hierarchy, unscoped). The evidence gate in §9.3 is unchanged — only the target version label moved.
+- No functional/FR/AC changes in this revision — retarget only. See `docs/roadmap.md` for the current Planned/Next table.
 
 ### 0.3 — 2026-07-11 (added the v1.4.0 / Wave 4 direction)
 
