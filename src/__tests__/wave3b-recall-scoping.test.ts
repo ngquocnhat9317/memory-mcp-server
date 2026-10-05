@@ -97,8 +97,8 @@ test("short titles keep single-term matching (AC-8.2)", async () => {
   }
 });
 
-test("floor miss falls back to exactly one best match (AC-8.3)", async () => {
-  const { toolDb, toolDir, tools } = await makeHarness("scoping-fallback");
+test("floor miss returns nothing: the lifeline is gone (spec 2026-10-05 G-4)", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-no-fallback");
 
   try {
     // Each candidate matches exactly one different term of a 5-term title.
@@ -111,12 +111,10 @@ test("floor miss falls back to exactly one best match (AC-8.3)", async () => {
       content: "gateway hardware inventory list",
     });
 
-    const ids = await recall(
-      tools,
-      "resolve checkout timeout payment gateway"
+    assert.deepEqual(
+      await recall(tools, "resolve checkout timeout payment gateway"),
+      []
     );
-    assert.equal(ids.length, 1, "fallback must return a single lifeline");
-    assert.ok(["mem_one", "mem_two"].includes(ids[0]));
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });

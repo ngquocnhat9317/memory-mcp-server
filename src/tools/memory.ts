@@ -22,7 +22,12 @@ import {
   type MemoryUpdateInput,
   type MemoryUsageReportInput,
 } from "../schemas/memory.js";
-import { getWorkspace, isTelemetryEnabled } from "../constants.js";
+import {
+  RECALL_RECENCY_DAYS,
+  RECALL_WEIGHTS,
+  getWorkspace,
+  isTelemetryEnabled,
+} from "../constants.js";
 import type { MemoryRecord, MemoryRow } from "../types.js";
 import {
   handleToolError,
@@ -30,8 +35,8 @@ import {
   nowIso,
   parseJsonArray,
   parseJsonObject,
-  toFtsQuery,
   toLimitedJson,
+  toSearchTerms,
 } from "../utils.js";
 import {
   withTelemetry,
@@ -230,7 +235,7 @@ export function registerMemoryTools(
     {
       title: "Save Memory",
       description:
-        "Persist a piece of long-term memory so it can be recalled in future sessions. Returns the created memory's id. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags; the server records the workspace automatically.",
+        "Persist a piece of long-term memory so it can be recalled in future sessions. Returns the created memory's id. Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put workspace or project names in tags. Pass workspace (your project directory) so the memory is scoped to this project; if omitted the server records its own working directory, and '/' or the home directory are stored as unknown.",
       inputSchema: MemorySaveInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -283,7 +288,7 @@ export function registerMemoryTools(
             agent_id: params.agent_id ?? null,
             importance: params.importance,
             metadata: params.metadata ? JSON.stringify(params.metadata) : null,
-            workspace: getWorkspace(),
+            workspace: getWorkspace(params.workspace),
             created_at: ts,
             updated_at: ts,
           });
@@ -309,7 +314,7 @@ export function registerMemoryTools(
     {
       title: "Search Memories",
       description:
-        "Full-text search over saved memories (content and tags), ranked by relevance. Optional filters: type, agent_id, tags (results must contain all); paginate with limit (default 20, max 200) and offset.",
+        "Full-text search over saved memories (content and tags). Any query term may match; results are ranked by term coverage, text relevance and recency (queries with 3+ terms need at least 2 to match). Optional filters: type, agent_id, tags (results must contain all); paginate with limit (default 20, max 200) and offset.",
       inputSchema: MemorySearchInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -343,39 +348,81 @@ export function registerMemoryTools(
       async (params: MemorySearchInput) => {
         const activeDb = await resolveDatabase(database);
         const { clause: tagClause, params: tagParams } = tagsFilterClauses(params.tags);
+        const terms = toSearchTerms(params.query);
         const conditions: string[] = [];
-        const sqlParams: Array<string | number> = [toFtsQuery(params.query)];
 
         if (params.type) {
           conditions.push("m.type = ?");
-          sqlParams.push(params.type);
         }
         if (params.agent_id) {
           conditions.push("m.agent_id = ?");
-          sqlParams.push(params.agent_id);
         }
         if (tagClause) {
           // tagClause is " AND <clauses>"; strip the prefix to compose here.
           conditions.push(tagClause.slice(" AND ".length));
         }
+        const filterParams: Array<string | number> = [];
+        if (params.type) filterParams.push(params.type);
+        if (params.agent_id) filterParams.push(params.agent_id);
 
-        // rank (bm25) sorts best text match first; importance/recency break ties.
-        const rows = activeDb
-          .prepare(
-            `SELECT m.* FROM memories m
-             JOIN (
-               SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
-             ) f ON m.rowid = f.rowid
-             ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
-             ORDER BY f.rank ASC, m.importance DESC, m.updated_at DESC
-             LIMIT ? OFFSET ?`
-          )
-          .all(
-            ...sqlParams,
-            ...tagParams,
-            params.limit,
-            params.offset
-          ) as unknown as MemoryRow[];
+        // Any term may match (OR). `hits` counts how many distinct terms each
+        // memory matches (one FTS query per term); the same floor as
+        // auto-recall applies: 3+ terms need >= 2 matches, otherwise >= 1.
+        // The blended score (same weights as auto-recall, minus the workspace
+        // term) is computed here, not in JS, so LIMIT/OFFSET paginate over a
+        // stable total order. Window aggregates normalize bm25 within the
+        // final eligible set; rank is negative (more negative = better) and
+        // all-equal counts as best.
+        const floor = terms.length >= 3 ? 2 : 1;
+        const rows =
+          terms.length === 0
+            ? []
+            : (activeDb
+                .prepare(
+                  `WITH hits AS (
+                     SELECT row_id, COUNT(*) AS matched FROM (
+                       ${terms
+                         .map(
+                           () =>
+                             "SELECT rowid AS row_id FROM memories_fts WHERE memories_fts MATCH ?"
+                         )
+                         .join(" UNION ALL ")}
+                     ) GROUP BY row_id
+                   ),
+                   eligible AS (
+                     SELECT m.*, f.rank AS fts_rank, h.matched AS matched_terms
+                     FROM memories m
+                     JOIN (
+                       SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
+                     ) f ON m.rowid = f.rowid
+                     JOIN hits h ON h.row_id = m.rowid
+                     WHERE h.matched >= ?${
+                       conditions.length > 0 ? ` AND ${conditions.join(" AND ")}` : ""
+                     }
+                   )
+                   SELECT * FROM eligible
+                   ORDER BY
+                     ${RECALL_WEIGHTS.coverage} * (matched_terms * 1.0 / ${terms.length})
+                     + ${RECALL_WEIGHTS.bm25} * COALESCE(
+                         (MAX(fts_rank) OVER () - fts_rank)
+                           / NULLIF(MAX(fts_rank) OVER () - MIN(fts_rank) OVER (), 0),
+                         1.0)
+                     + ${RECALL_WEIGHTS.recency} * COALESCE(
+                         1.0 / (1.0 + MAX(0.0, julianday('now') - julianday(updated_at))
+                                      / ${RECALL_RECENCY_DAYS}),
+                         0.0) DESC,
+                     importance DESC, updated_at DESC, id ASC
+                   LIMIT ? OFFSET ?`
+                )
+                .all(
+                  ...terms,
+                  terms.join(" OR "),
+                  floor,
+                  ...filterParams,
+                  ...tagParams,
+                  params.limit,
+                  params.offset
+                ) as unknown as MemoryRow[]);
 
         if (rows.length === 0) {
           return {

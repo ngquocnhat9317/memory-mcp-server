@@ -29,7 +29,13 @@ import type {
   ReasoningSessionRow,
   ReasoningStepRecord,
 } from "../types.js";
-import { AUTO_RECALL_LIMIT, SESSION_TTL_HOURS, getWorkspace } from "../constants.js";
+import {
+  AUTO_RECALL_LIMIT,
+  RECALL_RECENCY_DAYS,
+  RECALL_WEIGHTS,
+  SESSION_TTL_HOURS,
+  getWorkspace,
+} from "../constants.js";
 import {
   handleToolError,
   newId,
@@ -244,36 +250,48 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
   return Number(result.changes);
 }
 
-/** Candidate pool fetched by BM25 before the floor/re-rank pass. */
+/** Candidate pool fetched by BM25 before the gate/score pass. */
 const RECALL_CANDIDATE_POOL = 50;
 
 function recallRelatedMemories(
   database: DatabaseSync,
-  title: string
+  title: string,
+  workspace: string | null
 ): RelatedMemoryRecord[] {
   if (AUTO_RECALL_LIMIT <= 0) return [];
   try {
     const terms = toRecallTerms(title);
     if (terms.length === 0) return [];
 
+    // workspace_priority: 2 = current workspace, 1 = unknown (NULL) or a
+    // user preference (cross-project by nature), 0 = another project. With
+    // a known workspace the pool is ordered by it first so home memories are
+    // never crowded out of the candidate pool by other projects' BM25 hits.
+    // Memories already reported stale/unsafe are excluded outright.
     const candidates = database
       .prepare(
         `SELECT m.rowid AS row_id, m.id, m.type, m.content, m.tags,
                 m.importance, m.metadata, m.created_at, m.updated_at,
                 f.rank AS fts_rank,
                 CASE
-                  WHEN m.workspace = ?     THEN 2
-                  WHEN m.workspace IS NULL THEN 1
+                  WHEN m.workspace = ?                              THEN 2
+                  WHEN m.workspace IS NULL OR m.type = 'preference' THEN 1
                   ELSE 0
                 END AS workspace_priority
          FROM memories m
          JOIN (
            SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
          ) f ON m.rowid = f.rowid
-         ORDER BY f.rank ASC
+         WHERE m.id NOT IN (
+           SELECT memory_id FROM tool_usage_events
+           WHERE operation_type = 'feedback' AND status = 'success'
+             AND memory_id IS NOT NULL
+             AND json_extract(metadata, '$.usefulness') IN ('stale', 'unsafe_to_use')
+         )
+         ORDER BY ${workspace === null ? "" : "workspace_priority DESC, "}f.rank ASC
          LIMIT ?`
       )
-      .all(getWorkspace(), terms.join(" OR "), RECALL_CANDIDATE_POOL) as Array<{
+      .all(workspace, terms.join(" OR "), RECALL_CANDIDATE_POOL) as Array<{
       row_id: number;
       id: string;
       type: string;
@@ -299,32 +317,61 @@ function recallRelatedMemories(
         matchCounts.set(row.rowid, (matchCounts.get(row.rowid) ?? 0) + 1);
       }
     }
-    const scored = candidates.map((candidate) => ({
-      ...candidate,
-      matched: matchCounts.get(candidate.row_id) ?? 1,
-    }));
 
-    // Quality floor: multi-term titles require at least two matched terms.
-    // When nothing clears it, fall back to the single best-ranked match
-    // (serendipity lifeline) instead of padding every slot with junk.
-    const required = terms.length >= 3 ? 2 : 1;
-    let pool = scored.filter((candidate) => candidate.matched >= required);
-    let limit = AUTO_RECALL_LIMIT;
-    if (pool.length === 0) {
-      pool = scored;
-      limit = Math.min(1, AUTO_RECALL_LIMIT);
-    }
+    // Eligibility gate. Other projects' non-preference memories must match
+    // nearly the whole title; everyone else needs the base floor. Nothing
+    // eligible means nothing returned — no best-effort lifeline.
+    const total = terms.length;
+    const baseFloor = total >= 3 ? 2 : 1;
+    const crossProjectFloor = Math.max(2, Math.ceil(0.75 * total));
+    const eligible = candidates
+      .map((candidate) => ({
+        ...candidate,
+        matched: matchCounts.get(candidate.row_id) ?? 1,
+      }))
+      .filter((candidate) => {
+        const crossProject =
+          workspace !== null && candidate.workspace_priority === 0;
+        return candidate.matched >= (crossProject ? crossProjectFloor : baseFloor);
+      });
+    if (eligible.length === 0) return [];
 
-    pool.sort(
+    // Blended score. bm25 rank is negative (more negative = better), so
+    // min-max normalize within the eligible set; all-equal counts as best.
+    const ranks = eligible.map((candidate) => candidate.fts_rank);
+    const bestRank = Math.min(...ranks);
+    const worstRank = Math.max(...ranks);
+    const now = Date.now();
+    const scored = eligible.map((candidate) => {
+      const bm25 =
+        worstRank === bestRank
+          ? 1
+          : (worstRank - candidate.fts_rank) / (worstRank - bestRank);
+      const workspaceTerm =
+        workspace === null ? 0.5 : candidate.workspace_priority / 2;
+      const updatedMs = Date.parse(candidate.updated_at);
+      const ageDays = Number.isFinite(updatedMs)
+        ? Math.max(0, (now - updatedMs) / 86_400_000)
+        : Infinity;
+      const recency = 1 / (1 + ageDays / RECALL_RECENCY_DAYS);
+      return {
+        ...candidate,
+        score:
+          RECALL_WEIGHTS.coverage * (candidate.matched / total) +
+          RECALL_WEIGHTS.bm25 * bm25 +
+          RECALL_WEIGHTS.workspace * workspaceTerm +
+          RECALL_WEIGHTS.recency * recency,
+      };
+    });
+
+    scored.sort(
       (a, b) =>
-        b.matched - a.matched ||
-        b.workspace_priority - a.workspace_priority ||
-        a.fts_rank - b.fts_rank ||
+        b.score - a.score ||
         b.importance - a.importance ||
         (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0)
     );
 
-    return pool.slice(0, limit).map((row) => {
+    return scored.slice(0, AUTO_RECALL_LIMIT).map((row) => {
       const metadata = parseJsonObject(row.metadata);
       const sourceSessionId = metadata?.source_session_id;
       const sourceSessionTitle = metadata?.session_title;
@@ -367,9 +414,11 @@ export function registerReasoningTools(
 Args:
   - title (string, required): Short description of the task/question, e.g. "Diagnose flaky checkout test".
   - agent_id (string, optional): Identifier for the agent/persona running this session.
+  - workspace (string, optional): Absolute path of the project directory you are working in. Pass it: the server's own working directory is often "/" or your home directory, which counts as unknown.
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by text relevance, softly preferring the current workspace; weak one-word matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
+  - workspace: the resolved project workspace for this session, or null when unknown (then workspace_warning explains how to fix it).
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by a blend of term coverage, text relevance, workspace and recency; memories from other projects appear only when they match nearly the whole title (user preferences excepted); weak matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
   - open_sessions / open_sessions_warning: other in_progress sessions. Close the ones you opened and finished; leave sessions you don't recognize alone (they may belong to another agent or run).
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
@@ -419,12 +468,13 @@ Examples:
         const id = newId("sess");
         const ts = nowIso();
         const autoAbandoned = abandonStaleSessions(activeDb, ts);
+        const workspace = getWorkspace(params.workspace);
         activeDb
           .prepare(
-            `INSERT INTO reasoning_sessions (id, title, agent_id, status, conclusion, created_at, updated_at)
-             VALUES (?, ?, ?, 'in_progress', NULL, ?, ?)`
+            `INSERT INTO reasoning_sessions (id, title, agent_id, status, conclusion, workspace, created_at, updated_at)
+             VALUES (?, ?, ?, 'in_progress', NULL, ?, ?, ?)`
           )
-          .run(id, params.title, params.agent_id ?? null, ts, ts);
+          .run(id, params.title, params.agent_id ?? null, workspace, ts, ts);
 
         const openSessions = activeDb
           .prepare(
@@ -435,12 +485,23 @@ Examples:
           )
           .all(id) as Array<{ id: string; title: string; updated_at: string }>;
 
-        const relatedMemories = recallRelatedMemories(activeDb, params.title);
+        const relatedMemories = recallRelatedMemories(
+          activeDb,
+          params.title,
+          workspace
+        );
 
         const output = {
           session_id: id,
           title: params.title,
           status: "in_progress" as const,
+          workspace,
+          ...(workspace === null
+            ? {
+                workspace_warning:
+                  "Project workspace could not be determined (the server's working directory is '/', your home directory, or unset), so recall cannot prefer this project's memories. Pass workspace=<absolute project path> to reasoning_start_session and memory_save.",
+              }
+            : {}),
           related_memories: relatedMemories,
           ...(openSessions.length > 0
             ? {
@@ -1500,7 +1561,7 @@ Error Handling:
                 auto_saved: !(params.save_as_memory || params.memory_mode === "always"),
                 step_count: stepCount,
               }),
-              getWorkspace(),
+              session.workspace ?? null,
               ts,
               ts
             );

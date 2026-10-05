@@ -14,6 +14,13 @@ export const ReasoningStartSessionInputSchema = z
       .max(100)
       .optional()
       .describe("Optional identifier for the agent/persona running this session."),
+    workspace: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        "Absolute path of the project directory you are working in. Pass it so recall prefers this project's memories and your conclusion is saved under it. If omitted the server uses its own working directory; '/' and the home directory count as unknown."
+      ),
   })
   .strict();
 export type ReasoningStartSessionInput = z.infer<

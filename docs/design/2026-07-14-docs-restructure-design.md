@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Date | 2026-07-14 |
-| Status | Approved (brainstorming), pending implementation plan |
+| Status | ✅ **Implemented.** Plan: [`docs/plans/2026-07-14-docs-restructure.md`](../plans/2026-07-14-docs-restructure.md). Verified executed on 2026-08-07 — `docs/design/`, `docs/plans/`, `docs/README.md`, `docs/architecture.md`, `docs/roadmap.md` and the `architecture-doc-version` lock test all exist. (Was "Approved (brainstorming), pending implementation plan" — stale.) |
 | System version at design time | 1.3.0 (`package.json`) |
 | Audience | Contributors to `memory-mcp-server` (including the maintainer) |
 | Author | Maintainer + agent (brainstorming session) |
