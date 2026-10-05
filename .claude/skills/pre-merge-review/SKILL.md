@@ -11,7 +11,7 @@ This repo has three things that are easy to get right individually and easy
 to let drift apart under time pressure: the code, the tests, and the docs
 that describe both (including a hard version lock between `package.json`,
 `MCP_VERSION`, `docs/architecture.md`, and `GUIDELINES.md` — see
-`CLAUDE.md`'s Version-Sync Conventions). A merge should not go through with
+`AGENTS.md`'s Version-Sync Conventions). A merge should not go through with
 any of those three out of alignment. This skill runs a structured check of
 all three before you merge, so the reviewer (human or agent) doesn't have to
 remember the full checklist by hand every time.
@@ -82,7 +82,7 @@ this:
    surrounding context to judge correctness: does the change do what it
    appears to intend, does it follow this repo's existing patterns (read
    a neighboring file in the same directory if unsure what "existing
-   pattern" means here), does it introduce anything CLAUDE.md's Working
+   pattern" means here), does it introduce anything AGENTS.md's Working
    Rules forbid (speculative abstractions, behavior changes without
    updating tests, invented commands/behavior not implemented elsewhere)?
 4. This repo has no code-coverage tool (no nyc/c8/istanbul) — so "coverage"
@@ -91,7 +91,7 @@ this:
    `src/__tests__/` that actually exercise it. List any changed behavior
    you cannot find a corresponding test for — that's a blocking gap, not a
    suggestion.
-5. Read `CLAUDE.md`'s "Source of Truth" and "Working Rules" sections in the
+5. Read `AGENTS.md`'s "Source of Truth" and "Working Rules" sections in the
    repo root and confirm the diff doesn't violate them.
 
 Report back in this exact structure:
@@ -120,7 +120,7 @@ root: <repo-root>
 Base branch: <base>   Current branch: <current-branch>
 Diff scope: git diff <base>...<current-branch>
 
-First, read `CLAUDE.md` in the repo root — specifically the "Docs
+First, read `AGENTS.md` in the repo root — specifically the "Docs
 Conventions", "Release Process", and "Version-Sync Conventions" sections.
 Those sections are the current source of truth for what must stay in sync;
 follow whatever they say even if it differs from what's summarized below
@@ -163,7 +163,7 @@ Do this:
 4. Confirm the new-file placement conventions were followed if the diff
    added any new doc: design specs under `docs/design/`, implementation
    plans under `docs/plans/`, go-to-market docs under `docs/growth/` (per
-   CLAUDE.md's Docs Conventions).
+   AGENTS.md's Docs Conventions).
 
 Report back in this exact structure:
 
@@ -221,7 +221,7 @@ because the rest of the change looks good.
   pre-existing issues outside the diff's scope unless they're severe enough
   to block correctness of the new change (e.g., the new code depends on
   already-broken behavior).
-- If `CLAUDE.md`'s Docs Conventions / Release Process / Version-Sync
+- If `AGENTS.md`'s Docs Conventions / Release Process / Version-Sync
   Conventions sections have changed since this skill was written, trust the
   live file over this skill's summary of it — Subagent 2 is instructed to
   read it fresh every run for exactly this reason.
