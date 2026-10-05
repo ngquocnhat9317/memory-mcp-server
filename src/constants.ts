@@ -79,3 +79,19 @@ export function getWorkspace(explicit?: string): string | null {
 
 export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 200;
+
+/**
+ * Blended auto-recall score weights — see
+ * docs/design/2026-10-05-spec-recall-workspace-identity.md §3.4.
+ * Relevance (coverage + bm25) is the largest block; workspace only orders
+ * candidates that already passed the cross-project gate.
+ */
+export const RECALL_WEIGHTS = {
+  coverage: 0.45,
+  bm25: 0.2,
+  workspace: 0.3,
+  recency: 0.05,
+} as const;
+
+/** recency = 1 / (1 + age_days / RECALL_RECENCY_DAYS). */
+export const RECALL_RECENCY_DAYS = 60;
