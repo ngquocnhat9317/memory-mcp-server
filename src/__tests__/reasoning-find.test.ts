@@ -32,16 +32,23 @@ async function makeHarness(name: string) {
 function insertSession(
   db: DatabaseSync,
   id: string,
-  fields: { title: string; conclusion?: string | null; status?: string; updatedAt: string }
+  fields: {
+    title: string;
+    conclusion?: string | null;
+    status?: string;
+    workspace?: string | null;
+    updatedAt: string;
+  }
 ): void {
   db.prepare(
     `INSERT INTO reasoning_sessions (id, title, agent_id, status, conclusion, workspace, created_at, updated_at)
-     VALUES (?, ?, NULL, ?, ?, NULL, ?, ?)`
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`
   ).run(
     id,
     fields.title,
     fields.status ?? "completed",
     fields.conclusion ?? null,
+    fields.workspace ?? null,
     fields.updatedAt,
     fields.updatedAt
   );
@@ -61,6 +68,7 @@ function insertStep(
 
 type FindResult = {
   session_id: string;
+  workspace: string | null;
   matched_terms: number;
   conclusion: string | null;
   excerpts: Array<{ step_number: number; excerpt: string }>;
@@ -103,6 +111,39 @@ test("reasoning_find ranks by distinct terms matched, then recency (AC-20.3)", a
     const results = await find(tools, "walrus narwhal");
     assert.deepEqual(results.map((r) => r.session_id), ["sess_two", "sess_one_new", "sess_one_old"]);
     assert.equal(results[0].matched_terms, 2);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find results carry the session workspace", async () => {
+  const { db, dir, tools } = await makeHarness("find-workspace");
+  try {
+    insertSession(db, "sess_ws", { title: "tapir plan", workspace: "/proj/a", updatedAt: "2026-10-02T00:00:00.000Z" });
+    insertSession(db, "sess_nows", { title: "tapir notes", updatedAt: "2026-10-01T00:00:00.000Z" });
+    const byId = new Map((await find(tools, "tapir")).map((r) => [r.session_id, r]));
+    assert.equal(byId.get("sess_ws")?.workspace, "/proj/a");
+    assert.equal(byId.get("sess_nows")?.workspace, null);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find ranks empty sessions after sessions with content", async () => {
+  const { db, dir, tools } = await makeHarness("find-empty-last");
+  try {
+    insertSession(db, "sess_content", { title: "ocelot rollout", updatedAt: "2026-09-01T00:00:00.000Z" });
+    insertStep(db, "sess_content", 1, "ocelot rollout measured");
+    insertSession(db, "sess_empty", {
+      title: "ocelot rollout",
+      status: "in_progress",
+      updatedAt: "2026-10-05T00:00:00.000Z",
+    });
+    const results = await find(tools, "ocelot rollout");
+    assert.deepEqual(results.map((r) => r.session_id), ["sess_content", "sess_empty"]);
+    assert.equal(results[0].matched_terms, results[1].matched_terms);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

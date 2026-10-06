@@ -38,13 +38,17 @@ Theme: a smaller tool surface — 12 tools that were unused or never exploited r
   recall used-rate query is in `docs/architecture.md`.
 - Auto-recall snippets show the part of the memory that matched the title
   when it lies beyond the first 160 characters.
+- `reasoning_find` results include each session's `workspace`, and empty
+  sessions (no steps, no conclusion) rank last.
 
 ### Changed
 
 - `GUIDELINES.md` v9 (`2026-10-06.v9`): trace checkpoints and the three trace
   questions, pending-conclusion handling, first-sentence rule, stale triggers,
-  defaults for type and importance; shorter (6,481 vs 8,787 characters).
+  defaults for type and importance; shorter (6,525 vs 8,787 characters).
 - Trimmed `memory_update` / `memory_search` descriptions.
+- A memory flagged stale or unsafe returns to auto-recall once it is
+  corrected with `memory_update`.
 - `tools/list`: 27,484 → 16,223 characters (9 tools, was 20);
   `memory_update` + `memory_search`: 3,283 → 2,772.
 

@@ -178,7 +178,8 @@ function recallRelatedMemories(
     // user preference (cross-project by nature), 0 = another project. With
     // a known workspace the pool is ordered by it first so home memories are
     // never crowded out of the candidate pool by other projects' BM25 hits.
-    // Memories already reported stale/unsafe are excluded outright.
+    // Memories reported stale/unsafe are excluded until they are updated
+    // after the report.
     const candidates = database
       .prepare(
         `SELECT m.rowid AS row_id, m.id, m.type, m.content, m.tags,
@@ -193,11 +194,12 @@ function recallRelatedMemories(
          JOIN (
            SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
          ) f ON m.rowid = f.rowid
-         WHERE m.id NOT IN (
-           SELECT memory_id FROM tool_usage_events
-           WHERE operation_type = 'feedback' AND status = 'success'
-             AND memory_id IS NOT NULL
-             AND json_extract(metadata, '$.usefulness') IN ('stale', 'unsafe_to_use')
+         WHERE NOT EXISTS (
+           SELECT 1 FROM tool_usage_events e
+           WHERE e.memory_id = m.id
+             AND e.operation_type = 'feedback' AND e.status = 'success'
+             AND json_extract(e.metadata, '$.usefulness') IN ('stale', 'unsafe_to_use')
+             AND e.created_at >= m.updated_at
          )
          ORDER BY ${workspace === null ? "" : "workspace_priority DESC, "}f.rank ASC
          LIMIT ?`
@@ -830,6 +832,8 @@ Find first, then read only the session that matters.`,
           results = rows
             .sort(
               (a, b) =>
+                Number(a.step_count === 0 && !a.conclusion) -
+                  Number(b.step_count === 0 && !b.conclusion) ||
                 matched.get(b.id)!.size - matched.get(a.id)!.size ||
                 (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0) ||
                 (a.id < b.id ? -1 : 1)
@@ -846,6 +850,7 @@ Find first, then read only the session that matters.`,
                 session_id: row.id,
                 title: row.title,
                 status: row.status,
+                workspace: row.workspace,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
                 step_count: row.step_count,

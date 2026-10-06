@@ -33,7 +33,8 @@ the session's conclusion, saved by `reasoning_complete_session`.
      same-workspace one. If the loser can be corrected, fix it with
      `memory_update`; otherwise flag it stale (see Moment 3). A wrong memory
      is corrected or flagged, never deleted. A stale flag removes the memory
-     from auto-recall for good; it stays reachable through `memory_search`.
+     from auto-recall until it is next corrected with `memory_update`; it
+     stays reachable through `memory_search`.
    - `open_sessions`: close the ones you opened and finished; leave the others
      alone. A closed session cannot be reopened: start a new one and name the
      old one in the title.

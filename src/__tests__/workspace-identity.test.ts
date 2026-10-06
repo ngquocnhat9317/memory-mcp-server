@@ -474,3 +474,78 @@ test("memories reported stale or unsafe are not recalled; used/ignored do not ex
     cleanup(toolDb, toolDir);
   }
 });
+
+test("a stale memory corrected with memory_update is recalled again", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-corrected");
+  try {
+    insertMemory(toolDb, {
+      id: "mem_fixed",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+    });
+    const fb = await tools.memory_record_usage_feedback.handler({
+      memory_id: "mem_fixed",
+      usefulness: "stale",
+    });
+    assert.equal(fb.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const updated = await tools.memory_update.handler({
+      id: "mem_fixed",
+      content: "payment gateway release checklist for staging, revised",
+    });
+    assert.equal(updated.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), ["mem_fixed"]);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
+
+test("a memory flagged stale after its last update stays excluded", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-after-update");
+  try {
+    insertMemory(toolDb, {
+      id: "mem_flagged",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+    });
+    const updated = await tools.memory_update.handler({
+      id: "mem_flagged",
+      content: "payment gateway release checklist for staging, revised",
+    });
+    assert.equal(updated.isError, undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const fb = await tools.memory_record_usage_feedback.handler({
+      memory_id: "mem_flagged",
+      usefulness: "stale",
+    });
+    assert.equal(fb.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
+
+test("a stale flag recorded at the same instant as the last update keeps the memory excluded", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-same-instant");
+  try {
+    const instant = "2026-09-01T00:00:00.000Z";
+    insertMemory(toolDb, {
+      id: "mem_tie",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+      updatedAt: instant,
+    });
+    toolDb
+      .prepare(
+        `INSERT INTO tool_usage_events (id, created_at, mcp_version, tool_name, operation_type, access_type, status, memory_id, metadata)
+         VALUES (?, ?, '1.4.0', 'memory_record_usage_feedback', 'feedback', 'write', 'success', ?, '{"usefulness":"stale"}')`
+      )
+      .run("evt_tie", instant, "mem_tie");
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
