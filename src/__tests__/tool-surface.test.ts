@@ -11,6 +11,7 @@ import { registerMemoryTools } from "../tools/memory.js";
 import { registerReasoningTools } from "../tools/reasoning.js";
 import { registerUsageGuideTool } from "../tools/usage-guide.js";
 import { SERVER_INSTRUCTIONS } from "../server.js";
+import { handleToolError } from "../utils.js";
 import { insertMemory } from "./fixtures/memory-seed.js";
 
 export const KEPT_TOOL_NAMES = [
@@ -103,6 +104,28 @@ test("reasoning_find description states its trigger (AC-20.9)", () => {
   const { db, dir, tools } = makeServer();
   try {
     assert.match(tools.reasoning_find.description ?? "", /refers to earlier work/);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("error text points to reasoning_find and names no removed tool", async () => {
+  const { db, dir, tools } = makeServer();
+  try {
+    const res = await tools.reasoning_add_step.handler({
+      session_id: "sess_missing",
+      thought: "x",
+    });
+    assert.equal(res.isError, true);
+    const texts = [
+      res.content[0]?.text ?? "",
+      handleToolError(new Error("FOREIGN KEY constraint failed")),
+    ];
+    for (const text of texts) {
+      assert.match(text, /reasoning_find/);
+      for (const name of REMOVED_TOOL_NAMES) assert.ok(!text.includes(name), `${name} named in: ${text}`);
+    }
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

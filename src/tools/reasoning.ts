@@ -26,7 +26,6 @@ import {
   buildMatchExcerpt,
   buildRecallSnippet,
   compactSnippetText,
-  escapeLikePattern,
   handleToolError,
   newId,
   nowIso,
@@ -35,6 +34,7 @@ import {
   toRecallTerms,
   toLimitedJson,
   unquoteFtsTerm,
+  wordPrefixPattern,
 } from "../utils.js";
 import { recordToolUsageEvent, withTelemetry } from "./telemetry.js";
 
@@ -140,6 +140,9 @@ interface RelatedMemoryRecord {
   };
 }
 
+/** Conclusion written by abandonStaleSessions; carries no searchable content. */
+const AUTO_ABANDONED_CONCLUSION = "auto-abandoned: stale session";
+
 function abandonStaleSessions(database: DatabaseSync, now: string): number {
   if (SESSION_TTL_HOURS <= 0) return 0;
   const cutoff = new Date(
@@ -149,11 +152,11 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
     .prepare(
       `UPDATE reasoning_sessions
        SET status = 'abandoned',
-           conclusion = COALESCE(conclusion, 'auto-abandoned: stale session'),
+           conclusion = COALESCE(conclusion, ?),
            updated_at = ?
        WHERE status = 'in_progress' AND updated_at < ?`
     )
-    .run(now, cutoff);
+    .run(AUTO_ABANDONED_CONCLUSION, now, cutoff);
   return Number(result.changes);
 }
 
@@ -795,17 +798,23 @@ Find first, then read only the session that matters.`,
           `SELECT DISTINCT session_id FROM reasoning_steps
            WHERE rowid IN (SELECT rowid FROM reasoning_steps_fts WHERE reasoning_steps_fts MATCH ?)`
         );
-        const textMatches = activeDb.prepare(
-          `SELECT id FROM reasoning_sessions
-           WHERE title LIKE ? ESCAPE '\\' OR conclusion LIKE ? ESCAPE '\\'`
-        );
+        const patterns = words.map(wordPrefixPattern);
+        const sessionTexts = activeDb
+          .prepare(`SELECT id, title, conclusion FROM reasoning_sessions`)
+          .all() as Array<{ id: string; title: string; conclusion: string | null }>;
         terms.forEach((term, index) => {
           for (const row of stepMatches.all(term) as Array<{ session_id: string }>) {
             markMatch(row.session_id, index);
           }
-          const like = `%${escapeLikePattern(words[index])}%`;
-          for (const row of textMatches.all(like, like) as Array<{ id: string }>) {
-            markMatch(row.id, index);
+          for (const row of sessionTexts) {
+            if (
+              patterns[index].test(row.title) ||
+              (row.conclusion !== null &&
+                row.conclusion !== AUTO_ABANDONED_CONCLUSION &&
+                patterns[index].test(row.conclusion))
+            ) {
+              markMatch(row.id, index);
+            }
           }
         });
 

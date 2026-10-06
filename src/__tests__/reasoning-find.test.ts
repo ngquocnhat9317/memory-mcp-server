@@ -317,3 +317,92 @@ test("reasoning_find handles more matching sessions than SQLite bind variables",
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("reasoning_find treats % and _ in the query literally", async () => {
+  const { db, dir, tools } = await makeHarness("find-wildcards");
+  try {
+    insertSession(db, "sess_pct", { title: "progress 100% done", updatedAt: "2026-10-01T00:00:00.000Z" });
+    insertSession(db, "sess_snake", { title: "snake_case parser", updatedAt: "2026-10-02T00:00:00.000Z" });
+    insertSession(db, "sess_plain", { title: "plain title", updatedAt: "2026-10-03T00:00:00.000Z" });
+    assert.deepEqual((await find(tools, "100%")).map((r) => r.session_id), ["sess_pct"]);
+    assert.deepEqual((await find(tools, "snake_case")).map((r) => r.session_id), ["sess_snake"]);
+    for (const wildcard of ["%", "_"]) {
+      const ids = (await find(tools, wildcard)).map((r) => r.session_id);
+      assert.ok(!ids.includes("sess_plain"), `"${wildcard}" matched a session without it`);
+    }
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find matches titles and conclusions by word prefix", async () => {
+  const { db, dir, tools } = await makeHarness("find-word-prefix");
+  try {
+    insertSession(db, "sess_cat", { title: "fix catalog parser", updatedAt: "2026-10-01T00:00:00.000Z" });
+    assert.deepEqual((await find(tools, "log")).map((r) => r.session_id), []);
+    assert.deepEqual((await find(tools, "cat")).map((r) => r.session_id), ["sess_cat"]);
+    assert.deepEqual((await find(tools, "CATALOG")).map((r) => r.session_id), ["sess_cat"]);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find ignores the auto-abandoned placeholder conclusion", async () => {
+  const { db, dir, tools } = await makeHarness("find-placeholder");
+  try {
+    insertSession(db, "sess_placeholder", {
+      title: "unrelated",
+      status: "abandoned",
+      conclusion: "auto-abandoned: stale session",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    });
+    insertSession(db, "sess_real", {
+      title: "unrelated too",
+      conclusion: "dropped the stale cache entries",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    });
+    assert.deepEqual((await find(tools, "stale")).map((r) => r.session_id), ["sess_real"]);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find records usage telemetry for find and read modes", async () => {
+  const originalTelemetry = process.env.MEMORY_TELEMETRY;
+  process.env.MEMORY_TELEMETRY = "on";
+  const { db, dir, tools } = await makeHarness("find-telemetry");
+  try {
+    insertSession(db, "sess_t", { title: "gazelle plan", updatedAt: "2026-10-01T00:00:00.000Z" });
+    insertStep(db, "sess_t", 1, "first");
+    insertStep(db, "sess_t", 2, "second");
+    await find(tools, "gazelle", 3);
+    const read = await tools.reasoning_find.handler({ session_id: "sess_t" });
+    assert.equal(read.isError, undefined);
+
+    const rows = db
+      .prepare(
+        `SELECT input_shape, output_shape FROM tool_usage_events
+         WHERE tool_name = 'reasoning_find' ORDER BY created_at ASC, rowid ASC`
+      )
+      .all() as Array<{ input_shape: string; output_shape: string }>;
+    assert.equal(rows.length, 2);
+    const [findRow, readRow] = rows.map((r) => ({
+      input: JSON.parse(r.input_shape),
+      output: JSON.parse(r.output_shape),
+    }));
+    assert.equal(findRow.input.mode, "find");
+    assert.equal(findRow.input.query_length, "gazelle".length);
+    assert.equal(findRow.input.limit, 3);
+    assert.equal(findRow.output.result_count, 1);
+    assert.equal(readRow.input.mode, "read");
+    assert.equal(readRow.output.step_count, 2);
+  } finally {
+    if (originalTelemetry === undefined) delete process.env.MEMORY_TELEMETRY;
+    else process.env.MEMORY_TELEMETRY = originalTelemetry;
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

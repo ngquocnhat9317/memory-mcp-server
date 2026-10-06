@@ -162,6 +162,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Case-insensitive pattern matching `word` at the start of a word. */
+export function wordPrefixPattern(word: string): RegExp {
+  return new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(word)})`, "iu");
+}
+
 /**
  * Earliest case-insensitive word-prefix match of any word. Literal only:
  * FTS folds diacritics, this does not, so an FTS hit can return null here.
@@ -173,7 +178,7 @@ export function findFirstMatch(
   let best: { index: number; length: number } | null = null;
   for (const word of words) {
     if (!word) continue;
-    const match = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(word)})`, "iu").exec(text);
+    const match = wordPrefixPattern(word).exec(text);
     if (!match) continue;
     const index = match.index + match[1].length;
     if (!best || index < best.index) best = { index, length: match[2].length };

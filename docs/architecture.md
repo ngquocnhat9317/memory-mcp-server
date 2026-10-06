@@ -133,8 +133,9 @@ The typical task lifecycle, and where each step reads or writes the database:
    independent of `MEMORY_TELEMETRY`).
 4. **`reasoning_find(query | session_id)`** (any time, when earlier work is
    referred to that the current context lacks) — **reads** `reasoning_sessions`
-   (title/conclusion `LIKE`) and `reasoning_steps` via `reasoning_steps_fts`;
-   with a `session_id` it returns that session's full trace.
+   (title/conclusion word-prefix match) and `reasoning_steps` via
+   `reasoning_steps_fts`; with a `session_id` it returns that session's full
+   trace.
 
 `memory_search` / `memory_get` / `memory_update` read and correct `memories`
 outside a session. Memories are created only by
