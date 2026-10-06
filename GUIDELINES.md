@@ -24,14 +24,16 @@ the session's conclusion, saved by `reasoning_complete_session`.
 2. Read what comes back:
    - `related_memories`: saved conclusions matched to your title. An empty
      list is normal; do not pad the title. Snippets show the start of each
-     memory; read one in full with `memory_get`. A `source` says which session
-     produced it; read that session with `reasoning_find(session_id)` when the
-     snippet is not enough to know why. Note which ones help — you report them
-     at the end.
+     memory, plus the matching part when it lies further in; read one in full
+     with `memory_get`. A `source` says which session produced it; read that
+     session with `reasoning_find(session_id)` when the snippet is not enough
+     to know why. Note which ones help — you report them at the end.
    - With 2 or more memories, skim them for contradictions first. If two
-     conflict: read both with `memory_get`, prefer the newer same-workspace
-     one, correct the loser with `memory_update`, and flag it stale (see
-     Moment 3). A wrong memory is corrected or flagged, never deleted.
+     conflict: read both with `memory_get` and prefer the newer
+     same-workspace one. If the loser can be corrected, fix it with
+     `memory_update`; otherwise flag it stale (see Moment 3). A wrong memory
+     is corrected or flagged, never deleted. A stale flag removes the memory
+     from auto-recall for good; it stays reachable through `memory_search`.
    - `open_sessions`: close the ones you opened and finished; leave the others
      alone. A closed session cannot be reopened: start a new one and name the
      old one in the title.
@@ -73,9 +75,9 @@ Always close the session with `reasoning_complete_session`:
 
 - `conclusion`: the answer or decision, written to be reused. Its first
   sentence states the subject and the outcome; dates, sources and caveats come
-  after, because recall shows only the start. State the key decisions and the
-  options you rejected, with reasons. Required even when abandoning — one line
-  saying why is enough.
+  after, because a recall snippet always shows the start. State the key
+  decisions and the options you rejected, with reasons. Required even when
+  abandoning — one line saying why is enough.
 - A conclusion that waits on the user is not final. When the answer comes,
   record it: update the pending memory with `memory_update`, or flag it stale
   and let the new session's conclusion replace it.
@@ -83,7 +85,8 @@ Always close the session with `reasoning_complete_session`:
   honestly, including none.
 - Flag a memory with `memory_record_usage_feedback(usefulness='stale')` the
   moment either happens:
-  - a recalled memory contradicts what you just verified in code or data;
+  - a recalled memory contradicts what you just verified in code or data and
+    you are not correcting it with `memory_update`;
   - a decision you just recorded supersedes an older or pending memory.
 - Saving is opt-in: pass `save_as_memory=true` or `memory_mode='always'`; the
   default (`auto`) does not save. Save when the conclusion would help a future

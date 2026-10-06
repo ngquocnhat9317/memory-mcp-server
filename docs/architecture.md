@@ -88,7 +88,7 @@ Supporting modules used across layers:
   `MEMORY_WORKSPACE`, `MEMORY_TELEMETRY`), and `isTelemetryEnabled()`.
 - `src/types.ts` — shared TypeScript types for rows and tool payloads.
 - `src/utils.ts` — small shared helpers (id generation, timestamps, error
-  shaping).
+  shaping, FTS term helpers, match excerpts, the recall snippet).
 
 ## 3. Module Map
 
@@ -154,7 +154,7 @@ SQLite tables, all created/altered by the migrations in `src/migrations/`:
 | Table | Added by | Purpose |
 | --- | --- | --- |
 | `memories` | `0001_initial` (workspace column added by `0005_memory_workspace`; legacy `/` and home-directory values nulled by `0006_workspace_identity`) | Durable memory rows: `type`, `content`, `importance`, `tags`, `agent_id`, `source` (session provenance), `workspace` |
-| `reasoning_sessions` | `0001_initial` (workspace column added by `0006_workspace_identity`, `recalled_memory_ids` by `0008_session_recalled_memory_ids`) | One row per task-level reasoning session: `title`, `status`, `conclusion`, `workspace` (copied to persisted conclusions), `recalled_memory_ids` (JSON array of the ids auto-recall returned, in order; NULL for sessions before 1.4.0 or when nothing was recalled), timestamps |
+| `reasoning_sessions` | `0001_initial` (workspace column added by `0006_workspace_identity`, `recalled_memory_ids` by `0008_session_recalled_memory_ids`) | One row per task-level reasoning session: `title`, `status`, `conclusion`, `workspace` (copied to persisted conclusions), `recalled_memory_ids` (JSON array of the ids auto-recall returned, in order; NULL for sessions before 1.4.0, when nothing was recalled, or when the best-effort write failed), timestamps |
 | `reasoning_steps` | `0001_initial` | Ordered steps within a session: `thought`/`action`/`observation`, `step_number` |
 | `tool_usage_events` | `0004_tool_usage_events` | Diagnostics/telemetry events (gated by `MEMORY_TELEMETRY`) and usage-feedback events (always recorded) |
 | `schema_migrations` | created directly by `runMigrations` (not a numbered migration) | Tracks which migration versions have been applied |

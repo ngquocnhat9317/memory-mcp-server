@@ -16,13 +16,14 @@ already state.
 | `1.3.1` | Agent-guidance snippet installer: `install-agents` CLI subcommand and `scripts/install-agent-snippet.sh` (`curl \| bash`), both writing the README's Memory MCP snippet into global Claude Code / Codex CLI config | *(no design spec — ad hoc; see `CHANGELOG.md`)* |
 | `1.3.3` | Recall workspace identity + blended scoring on both recall surfaces — Option A in full: `workspace` parameter, `/`/home treated as unknown, cross-project gate with `preference` bypass, blended auto-recall score, stale-feedback exclusion, no lifeline; `memory_search` OR matching with a coverage floor and the same blended ranking computed in SQL (Option A′); recall eval base (WI-11, pulled forward from `1.4.0`) | [2026-10-05-spec-recall-workspace-identity.md](design/2026-10-05-spec-recall-workspace-identity.md), [2026-08-07-spec-zero-mem-inspired-recall.md](design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A / A′, eval cases in `src/__tests__/fixtures/recall-eval-cases.ts` (WI-11) |
 | `1.3.2` | Guide-contract alignment: `GUIDELINES.md` synced with real tool contracts (`v5`→`v6`→`v7`), server-level `instructions` field, tool description clarity pass, new docs-consistency test; conflict-check and mark-step guidance tightened from soft suggestions to concrete triggers after telemetry showed near-zero adoption | *(no design spec — ad hoc; see `CHANGELOG.md`; tool-usage evidence in [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md) §3.1)* |
-| `1.4.0` | Tool-surface reduction — 12 unused tools removed (`tools/list` 27,484 → 16,223 characters, 9 tools), `reasoning_find` replaces the trace/session/step readers, migration `0007` drops `reasoning_step_marks`, recalled memory ids recorded per session (`0008`) with a documented used-rate query, query-aware recall snippet, `GUIDELINES.md` v9 | [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md), [2026-10-06-v1.4.0-tool-surface-reduction.md](plans/2026-10-06-v1.4.0-tool-surface-reduction.md) |
+| `1.4.0` | Tool-surface reduction — 12 tools that were unused or never exploited removed (`tools/list` 27,484 → 16,223 characters, 9 tools), `reasoning_find` replaces the trace/session/step readers, migration `0007` drops `reasoning_step_marks`, recalled memory ids recorded per session (`0008`) with a documented used-rate query, query-aware recall snippet, `GUIDELINES.md` v9 | [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md), [2026-10-06-v1.4.0-tool-surface-reduction.md](plans/2026-10-06-v1.4.0-tool-surface-reduction.md) |
 
 ## Planned / Next
 
 **`1.3.3` is the last `1.3.x` release** — there is no `1.3.4` or `1.3.5`.
-The work once planned for `1.3.5` was merged into `1.4.0`, and Wave 4 moved
-to `2.0.0`.
+The work once planned for `1.3.5` was resolved elsewhere: WI-11 shipped in
+`1.3.3`, and the other items were dropped (WI-12 and WI-14 earlier, WI-10,
+WI-13 and WI-15 on 2026-10-05). Wave 4 moved to `2.0.0`.
 
 ### `2.0.0`
 
