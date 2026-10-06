@@ -216,3 +216,33 @@ export function buildMatchExcerpt(text: string, words: string[], size = 160): st
   const body = sliceToWords(compact, start, end, match);
   return `${start > 0 ? "..." : ""}${body}${end < compact.length ? "..." : ""}`;
 }
+
+const RECALL_SNIPPET_MAX = 160;
+const RECALL_SNIPPET_HEAD = 60;
+const RECALL_SNIPPET_SEPARATOR = " … ";
+
+/**
+ * Auto-recall snippet: the head when the first title-term match is already
+ * visible in it (identical to compactSnippetText), otherwise ~60 chars of
+ * head + " … " + a window around the match. Falls back to the head when no
+ * term occurs literally (tag-only or diacritic-folded FTS matches) or on
+ * any error.
+ */
+export function buildRecallSnippet(content: string, terms: string[]): string {
+  try {
+    const compact = content.replace(/\s+/g, " ").trim();
+    const head = compactSnippetText(compact);
+    if (compact.length <= RECALL_SNIPPET_MAX) return head;
+    const match = findFirstMatch(compact, terms.map(unquoteFtsTerm));
+    if (!match || match.index + match.length <= RECALL_SNIPPET_MAX - 3) return head;
+    const headPart = sliceToWords(compact, 0, RECALL_SNIPPET_HEAD);
+    const room =
+      RECALL_SNIPPET_MAX - headPart.length - RECALL_SNIPPET_SEPARATOR.length - 3;
+    const start = Math.max(headPart.length, match.index - Math.floor(room / 3));
+    const end = start + room;
+    const windowText = sliceToWords(compact, start, end, match);
+    return `${headPart}${RECALL_SNIPPET_SEPARATOR}${windowText}${end < compact.length ? "..." : ""}`;
+  } catch {
+    return compactSnippetText(content);
+  }
+}

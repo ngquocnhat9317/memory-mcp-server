@@ -24,6 +24,7 @@ import {
 } from "../constants.js";
 import {
   buildMatchExcerpt,
+  buildRecallSnippet,
   compactSnippetText,
   escapeLikePattern,
   handleToolError,
@@ -290,7 +291,7 @@ function recallRelatedMemories(
         type: row.type,
         importance: row.importance,
         tags: parseJsonArray(row.tags),
-        snippet: compactSnippetText(row.content),
+        snippet: buildRecallSnippet(row.content, terms),
         ...(typeof sourceSessionId === "string" &&
         typeof sourceSessionTitle === "string"
           ? {
