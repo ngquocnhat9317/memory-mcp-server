@@ -122,109 +122,35 @@ test("memory_search matches content via FTS and honors type filter", async () =>
   }
 });
 
-test("tag filters treat LIKE wildcards literally", async () => {
+test("memory_search tag filters treat LIKE wildcards literally", async () => {
   const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-tags");
 
   try {
-    await tools.memory_save.handler({
-      content: "memory tagged with a literal percent tag",
-      type: "fact",
-      tags: ["a%b"],
-      importance: 3,
-    });
-    await tools.memory_save.handler({
-      content: "memory tagged with a plain tag",
-      type: "fact",
-      tags: ["aXb"],
-      importance: 3,
-    });
+    insertMemory(toolDb, { content: "memory tagged with a literal percent tag", tags: ["a%b"] });
+    insertMemory(toolDb, { content: "memory tagged with a plain tag", tags: ["aXb"] });
 
-    const listed = await tools.memory_list.handler({
+    const percent = await tools.memory_search.handler({
+      query: "memory tagged",
       tags: ["a%b"],
-      sort_by: "updated_at",
       limit: 20,
       offset: 0,
     });
-    assert.equal(listed.isError, undefined);
-    const listedPayload = listed.structuredContent as {
-      total: number;
+    assert.equal(percent.isError, undefined);
+    const percentPayload = percent.structuredContent as {
+      total_returned: number;
       results: Array<{ tags: string[] }>;
     };
-    assert.equal(listedPayload.total, 1);
-    assert.deepEqual(listedPayload.results[0].tags, ["a%b"]);
+    assert.equal(percentPayload.total_returned, 1);
+    assert.deepEqual(percentPayload.results[0].tags, ["a%b"]);
 
-    const underscore = await tools.memory_list.handler({
+    const underscore = await tools.memory_search.handler({
+      query: "memory tagged",
       tags: ["a_b"],
-      sort_by: "updated_at",
       limit: 20,
       offset: 0,
     });
-    const underscorePayload = underscore.structuredContent as { total: number };
-    assert.equal(underscorePayload.total, 0);
-  } finally {
-    toolDb.close();
-    fs.rmSync(toolDir, { recursive: true, force: true });
-  }
-});
-
-test("memory_list filters by importance and paginates deterministically", async () => {
-  const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-list");
-
-  try {
-    for (let i = 1; i <= 5; i += 1) {
-      await tools.memory_save.handler({
-        content: `list item ${i}`,
-        type: "fact",
-        tags: [],
-        importance: i,
-      });
-    }
-
-    const important = await tools.memory_list.handler({
-      min_importance: 4,
-      sort_by: "importance",
-      limit: 20,
-      offset: 0,
-    });
-    const importantPayload = important.structuredContent as {
-      total: number;
-      results: Array<{ importance: number }>;
-    };
-    assert.equal(importantPayload.total, 2);
-    assert.deepEqual(
-      importantPayload.results.map((row) => row.importance),
-      [5, 4]
-    );
-
-    const firstPage = await tools.memory_list.handler({
-      sort_by: "importance",
-      limit: 2,
-      offset: 0,
-    });
-    const firstPayload = firstPage.structuredContent as {
-      total: number;
-      total_returned: number;
-      has_more: boolean;
-      next_offset?: number;
-    };
-    assert.equal(firstPayload.total, 5);
-    assert.equal(firstPayload.total_returned, 2);
-    assert.equal(firstPayload.has_more, true);
-    assert.equal(firstPayload.next_offset, 2);
-
-    const lastPage = await tools.memory_list.handler({
-      sort_by: "importance",
-      limit: 2,
-      offset: 4,
-    });
-    const lastPayload = lastPage.structuredContent as {
-      total_returned: number;
-      has_more: boolean;
-      next_offset?: number;
-    };
-    assert.equal(lastPayload.total_returned, 1);
-    assert.equal(lastPayload.has_more, false);
-    assert.equal(lastPayload.next_offset, undefined);
+    assert.equal(underscore.structuredContent, undefined);
+    assert.match(underscore.content[0]?.text ?? "", /No memories found/);
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });
@@ -286,35 +212,6 @@ test("memory_update patches tags and metadata without clobbering other fields", 
     });
     assert.equal(missing.isError, true);
     assert.match(missing.content[0].text, /not found/);
-  } finally {
-    toolDb.close();
-    fs.rmSync(toolDir, { recursive: true, force: true });
-  }
-});
-
-test("memory_delete removes the row and reports missing ids", async () => {
-  const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-delete");
-
-  try {
-    const saved = await tools.memory_save.handler({
-      content: "to be deleted",
-      type: "fact",
-      tags: [],
-      importance: 3,
-    });
-    const memoryId = (saved.structuredContent as { id: string }).id;
-
-    const deleted = await tools.memory_delete.handler({ id: memoryId });
-    assert.equal(deleted.isError, undefined);
-    assert.match(deleted.content[0].text, /deleted/);
-
-    const fetched = await tools.memory_get.handler({ id: memoryId });
-    assert.equal(fetched.isError, true);
-    assert.match(fetched.content[0].text, /not found/);
-
-    const again = await tools.memory_delete.handler({ id: memoryId });
-    assert.equal(again.isError, true);
-    assert.match(again.content[0].text, /not found/);
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });

@@ -31,13 +31,6 @@ export interface MemoryRow {
 }
 
 export type SessionStatus = "in_progress" | "completed" | "abandoned";
-export type ReasoningMarkType =
-  | "milestone"
-  | "decision"
-  | "conflict"
-  | "important"
-  | "hypothesis";
-
 export interface ReasoningSessionRecord {
   id: string;
   title: string;
@@ -67,41 +60,5 @@ export interface ReasoningStepRecord {
   thought: string | null;
   action: string | null;
   observation: string | null;
-  created_at: string;
-}
-
-export interface ReasoningSearchStepRecord extends ReasoningStepRecord {
-  agent_id: string | null;
-  snippet: string;
-}
-
-export interface ReasoningMilestoneRecord {
-  session_id: string;
-  step_id: string;
-  step_number: number;
-  mark_type: ReasoningMarkType;
-  note: string | null;
-  created_at: string;
-  snippet: string;
-}
-
-export interface ReasoningOutlineStepRecord extends ReasoningStepRecord {
-  mark_type: ReasoningMarkType | null;
-  note: string | null;
-}
-
-export interface ReasoningStepMarkRecord {
-  id: string;
-  step_id: string;
-  mark_type: ReasoningMarkType;
-  note: string | null;
-  created_at: string;
-}
-
-export interface ReasoningStepMarkRow {
-  id: string;
-  step_id: string;
-  mark_type: string;
-  note: string | null;
   created_at: string;
 }

@@ -56,6 +56,7 @@ test("runMigrations records all registered migrations after creating the baselin
         "0004_tool_usage_events",
         "0005_memory_workspace",
         "0006_workspace_identity",
+        "0007_drop_reasoning_step_marks",
       ]
     );
   } finally {
@@ -111,6 +112,55 @@ test("0003_reasoning_steps_fts backfills existing reasoning steps", () => {
       .all('"searchable"*') as Array<{ rowid: number }>;
 
     assert.equal(rows.length, 1);
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("0007 drops reasoning_step_marks and keeps steps and their FTS index (AC-16.5)", () => {
+  const dbPath = makeTempDbPath("drop-marks");
+  const tempDir = path.dirname(dbPath);
+  const db = new DatabaseSync(dbPath);
+  try {
+    runMigrations(db);
+    db.prepare(
+      "INSERT INTO reasoning_sessions (id, title, status, created_at, updated_at) VALUES ('s1', 't', 'in_progress', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')"
+    ).run();
+    db.prepare(
+      "INSERT INTO reasoning_steps (id, session_id, step_number, thought, created_at) VALUES ('st1', 's1', 1, 'heron sighting', '2026-01-01T00:00:00.000Z')"
+    ).run();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','trigger')").all() as Array<{ name: string }>).map((r) => r.name);
+    assert.ok(!tables.includes("reasoning_step_marks"));
+    for (const name of ["reasoning_steps", "reasoning_steps_fts", "reasoning_steps_ai", "reasoning_steps_ad", "reasoning_steps_au"]) {
+      assert.ok(tables.includes(name), `${name} should remain`);
+    }
+    const hit = db.prepare("SELECT rowid FROM reasoning_steps_fts WHERE reasoning_steps_fts MATCH 'heron'").all();
+    assert.equal(hit.length, 1, "a step added after 0007 is still indexed");
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("0007 on a database at 0006 with marks keeps step rows (AC-16.5)", () => {
+  const dbPath = makeTempDbPath("drop-marks-upgrade");
+  const tempDir = path.dirname(dbPath);
+  const db = new DatabaseSync(dbPath);
+  try {
+    runMigrations(db); // reaches 0007 already; rebuild the pre-0007 state:
+    db.exec(`
+      DELETE FROM schema_migrations WHERE version = '0007_drop_reasoning_step_marks';
+      CREATE TABLE reasoning_step_marks (id TEXT PRIMARY KEY, step_id TEXT NOT NULL, mark_type TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL);
+      INSERT INTO reasoning_sessions (id, title, status, created_at, updated_at) VALUES ('s1', 't', 'completed', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+      INSERT INTO reasoning_steps (id, session_id, step_number, thought, created_at) VALUES ('st1', 's1', 1, 'kept', '2026-01-01T00:00:00.000Z');
+      INSERT INTO reasoning_step_marks VALUES ('m1', 'st1', 'decision', 'n', '2026-01-01T00:00:00.000Z');
+    `);
+    runMigrations(db);
+    const marks = db.prepare("SELECT name FROM sqlite_master WHERE name = 'reasoning_step_marks'").all();
+    assert.equal(marks.length, 0);
+    const steps = db.prepare("SELECT COUNT(*) AS c FROM reasoning_steps").get() as { c: number };
+    assert.equal(steps.c, 1);
   } finally {
     db.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
