@@ -1643,8 +1643,8 @@ test("usage feedback is persisted even when telemetry is disabled, while other e
       ._registeredTools;
     const recordFeedback = registeredTools.memory_record_usage_feedback?.handler;
     assert.ok(recordFeedback, "memory_record_usage_feedback should be registered");
-    const saveMemory = registeredTools.memory_save?.handler;
-    assert.ok(saveMemory, "memory_save should be registered");
+    const searchMemory = registeredTools.memory_search?.handler;
+    assert.ok(searchMemory, "memory_search should be registered");
 
     toolDb.exec(`
       DELETE FROM tool_usage_events;
@@ -1687,13 +1687,9 @@ test("usage feedback is persisted even when telemetry is disabled, while other e
     assert.equal(feedbackEvents.length, 1);
     assert.equal(feedbackEvents[0].memory_id, "mem_feedback");
 
-    // Non-feedback events must stay gated: a memory_save records nothing.
-    const saved = await saveMemory({
-      content: "diagnostics stay opt-in",
-      type: "fact",
-      importance: 3,
-    });
-    assert.equal(saved.isError, undefined);
+    // Non-feedback events must stay gated: a memory_search records nothing.
+    const searched = await searchMemory({ query: "anything", limit: 20, offset: 0 });
+    assert.equal(searched.isError, undefined);
     const nonFeedbackCount = toolDb
       .prepare(
         `SELECT COUNT(*) as c FROM tool_usage_events

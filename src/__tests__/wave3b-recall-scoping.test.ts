@@ -47,6 +47,31 @@ async function makeHarness(name: string): Promise<{
   return { toolDb, toolDir, tools };
 }
 
+async function saveConclusion(
+  tools: RegisteredToolMap,
+  db: DatabaseSync,
+  workspace?: string
+): Promise<string | null> {
+  const started = await tools.reasoning_start_session.handler({
+    title: "workspace stamping",
+    ...(workspace !== undefined ? { workspace } : {}),
+  });
+  const sessionId = (started.structuredContent as { session_id: string }).session_id;
+  await tools.reasoning_add_step.handler({ session_id: sessionId, thought: "t" });
+  const done = await tools.reasoning_complete_session.handler({
+    session_id: sessionId,
+    conclusion: "stamped",
+    status: "completed",
+    save_as_memory: true,
+  });
+  const memoryId = (done.structuredContent as { memory_id: string }).memory_id;
+  return (
+    db.prepare(`SELECT workspace FROM memories WHERE id = ?`).get(memoryId) as {
+      workspace: string | null;
+    }
+  ).workspace;
+}
+
 function insertMemory(
   db: DatabaseSync,
   fields: {
@@ -223,17 +248,7 @@ test("MEMORY_WORKSPACE pins the stamped workspace (AC-9.4)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("scoping-ws-pin");
 
   try {
-    const saved = await tools.memory_save.handler({
-      content: "stamped under a pinned workspace",
-      type: "fact",
-      importance: 3,
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, "/pinned-ws");
+    assert.equal(await saveConclusion(tools, toolDb), "/pinned-ws");
   } finally {
     if (originalWorkspace === undefined) {
       delete process.env.MEMORY_WORKSPACE;

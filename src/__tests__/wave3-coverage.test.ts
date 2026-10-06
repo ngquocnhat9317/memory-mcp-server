@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runMigrations } from "../migrations/index.js";
+import { insertMemory } from "./fixtures/memory-seed.js";
 import {
   MemoryUsageReportInputSchema,
 } from "../schemas/memory.js";
@@ -108,14 +109,13 @@ test("memory_update covers replace, patch, merge, and error branches", async () 
   const { toolDb, toolDir, tools } = await makeHarness("cov-update");
 
   try {
-    const saved = await tools.memory_save.handler({
+    const id = insertMemory(toolDb, {
       content: "original content",
       type: "fact",
       tags: ["keep", "drop"],
       importance: 2,
       metadata: { a: 1, b: 2 },
     });
-    const id = (saved.structuredContent as { id: string }).id;
 
     // tags_append/tags_remove merge path + metadata_patch merge path.
     const patched = await tools.memory_update.handler({
@@ -258,17 +258,15 @@ test("memory_search covers agent filter and offset pagination", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("cov-search");
 
   try {
-    await tools.memory_save.handler({
+    insertMemory(toolDb, {
       content: "grafana dashboard tuning",
       type: "fact",
-      importance: 3,
-      agent_id: "agent-a",
+      agentId: "agent-a",
     });
-    await tools.memory_save.handler({
+    insertMemory(toolDb, {
       content: "grafana alert rules",
       type: "fact",
-      importance: 3,
-      agent_id: "agent-b",
+      agentId: "agent-b",
     });
 
     const filtered = await tools.memory_search.handler({
@@ -544,12 +542,7 @@ test("memory_record_usage_feedback accepts direct memory-id feedback via wrapper
   const { toolDb, toolDir, tools } = await makeHarness("cov-feedback-direct");
 
   try {
-    const saved = await tools.memory_save.handler({
-      content: "feedback subject",
-      type: "fact",
-      importance: 3,
-    });
-    const id = (saved.structuredContent as { id: string }).id;
+    const id = insertMemory(toolDb, { content: "feedback subject", type: "fact" });
 
     const feedback = await tools.memory_record_usage_feedback.handler({
       memory_id: id,
@@ -574,14 +567,10 @@ test("oversized responses truncate instead of overflowing", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("cov-truncate");
 
   try {
-    const big = "x".repeat(30000);
-    const saved = await tools.memory_save.handler({
-      content: big,
-      type: "fact",
-      importance: 3,
-    });
-    assert.equal(saved.isError, undefined);
-    assert.match(saved.content[0]?.text ?? "", /truncated/);
+    const id = insertMemory(toolDb, { content: "x".repeat(30000) });
+    const got = await tools.memory_get.handler({ id });
+    assert.equal(got.isError, undefined);
+    assert.match(got.content[0]?.text ?? "", /truncated/);
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });
@@ -592,12 +581,9 @@ test("constraint violations map to a readable error message", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("cov-constraint");
 
   try {
+    const id = insertMemory(toolDb, { content: "valid memory" });
     // Direct handler call bypasses zod, so the DB CHECK fires.
-    const bad = await tools.memory_save.handler({
-      content: "impossible importance",
-      type: "fact",
-      importance: 42,
-    });
+    const bad = await tools.memory_update.handler({ id, importance: 42 });
     assert.equal(bad.isError, true);
     assert.match(bad.content[0]?.text ?? "", /Invalid value provided/);
   } finally {
@@ -611,13 +597,11 @@ test("telemetry recording failures never break the tool call", async () => {
 
   try {
     toolDb.exec(`DROP TABLE tool_usage_events`);
-    const saved = await tools.memory_save.handler({
-      content: "survives telemetry outage",
-      type: "fact",
-      importance: 3,
+    const started = await tools.reasoning_start_session.handler({
+      title: "survives telemetry outage",
     });
-    assert.equal(saved.isError, undefined);
-    assert.match(saved.content[0]?.text ?? "", /Memory saved/);
+    assert.equal(started.isError, undefined);
+    assert.match(started.content[0]?.text ?? "", /Reasoning session started/);
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });

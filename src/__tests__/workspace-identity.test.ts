@@ -50,6 +50,31 @@ async function makeHarness(name: string): Promise<{
   return { toolDb, toolDir, tools };
 }
 
+async function saveConclusion(
+  tools: RegisteredToolMap,
+  db: DatabaseSync,
+  workspace?: string
+): Promise<string | null> {
+  const started = await tools.reasoning_start_session.handler({
+    title: "workspace stamping",
+    ...(workspace !== undefined ? { workspace } : {}),
+  });
+  const sessionId = (started.structuredContent as { session_id: string }).session_id;
+  await tools.reasoning_add_step.handler({ session_id: sessionId, thought: "t" });
+  const done = await tools.reasoning_complete_session.handler({
+    session_id: sessionId,
+    conclusion: "stamped",
+    status: "completed",
+    save_as_memory: true,
+  });
+  const memoryId = (done.structuredContent as { memory_id: string }).memory_id;
+  return (
+    db.prepare(`SELECT workspace FROM memories WHERE id = ?`).get(memoryId) as {
+      workspace: string | null;
+    }
+  ).workspace;
+}
+
 function cleanup(toolDb: DatabaseSync, toolDir: string): void {
   toolDb.close();
   fs.rmSync(toolDir, { recursive: true, force: true });
@@ -135,41 +160,19 @@ test("getWorkspace precedence is explicit, then MEMORY_WORKSPACE, then cwd (AC-1
   });
 });
 
-test("memory_save stores the explicit workspace, normalized (AC-10)", async () => {
+test("a saved conclusion stores the explicit workspace, normalized (AC-10)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("ws-save-explicit");
   try {
-    const saved = await tools.memory_save.handler({
-      content: "saved from an explicit project",
-      type: "fact",
-      importance: 3,
-      workspace: "/proj/x/",
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, "/proj/x");
+    assert.equal(await saveConclusion(tools, toolDb, "/proj/x/"), "/proj/x");
   } finally {
     cleanup(toolDb, toolDir);
   }
 });
 
-test("memory_save stores NULL when the workspace is unknown (AC-10)", async () => {
+test("a saved conclusion stores NULL when the workspace is unknown (AC-10)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("ws-save-unknown");
   try {
-    const saved = await tools.memory_save.handler({
-      content: "saved from an unknown project",
-      type: "fact",
-      importance: 3,
-      workspace: "/",
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, null);
+    assert.equal(await saveConclusion(tools, toolDb, "/"), null);
   } finally {
     cleanup(toolDb, toolDir);
   }

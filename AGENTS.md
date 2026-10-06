@@ -89,14 +89,19 @@ for low real-world usage, use this standing threshold (owner decision,
   dates and the guide version in effect wherever the metric is reported.
 - **Minimum sample:** do not decide on fewer than 20 reasoning sessions opened
   in the window; extend the window instead of deciding on a small sample.
+- **A high `tool_rate` is necessary, not sufficient.** A tool whose output
+  or stored data is never exploited — no agent-facing read path and no
+  server-side use — is a removal candidate at any rate: being called without
+  being exploited only spends tokens. Data that no remaining tool or server
+  path reads is deleted with a migration, not kept "for later".
 - **Removing a tool is a breaking change to the MCP tool surface** — it
   requires its own `MCP_VERSION`/`package.json` bump and `CHANGELOG.md` entry
   per the Release Process above, regardless of which version line it lands on.
-- A specific application of this policy (window dates, current candidate
-  list, the reusable SQL) lives in
-  [`docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md`](docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md)
-  §8.1 / §8.1.1 / §8.1.2 — this section is the durable rule, that spec is one
-  measurement against it.
+- A specific application of this policy (window dates, removal list, the
+  reusable SQL) lives in
+  [`docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md`](docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md)
+  §3.1 — this section is the durable rule, that spec is one measurement
+  against it.
 
 ## Repo Map
 

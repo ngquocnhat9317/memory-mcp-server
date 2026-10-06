@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runMigrations } from "../migrations/index.js";
+import { insertMemory } from "./fixtures/memory-seed.js";
 
 function makeWorkspaceDbPath(name: string): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-memory-mcp-"));
@@ -41,39 +42,28 @@ async function makeMemoryToolHarness(name: string): Promise<{
   return { toolDb, toolDir, tools };
 }
 
-test("memory_save then memory_get round-trips all fields", async () => {
-  const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-roundtrip");
+test("memory_get returns every stored field", async () => {
+  const { toolDb, toolDir, tools } = await makeMemoryToolHarness("get-fields");
 
   try {
-    const saved = await tools.memory_save.handler({
-      content: "User prefers TypeScript for backend services",
-      type: "preference",
-      tags: ["backend", "typescript"],
+    const id = insertMemory(toolDb, {
+      content: "Round trip content",
+      type: "decision",
+      tags: ["alpha", "beta"],
+      agentId: "agent-x",
       importance: 4,
-      agent_id: "agent-a",
-      metadata: { source: "review" },
+      metadata: { source: "test" },
     });
-    assert.equal(saved.isError, undefined);
-    const savedPayload = saved.structuredContent as {
-      id: string;
-      type: string;
-      content: string;
-      tags: string[];
-      importance: number;
-      agent_id: string | null;
-      metadata: Record<string, unknown> | null;
-    };
-    assert.match(savedPayload.id, /^mem_/);
-
-    const fetched = await tools.memory_get.handler({ id: savedPayload.id });
-    assert.equal(fetched.isError, undefined);
-    const fetchedPayload = fetched.structuredContent as typeof savedPayload;
-    assert.equal(fetchedPayload.content, "User prefers TypeScript for backend services");
-    assert.equal(fetchedPayload.type, "preference");
-    assert.deepEqual(fetchedPayload.tags, ["backend", "typescript"]);
-    assert.equal(fetchedPayload.importance, 4);
-    assert.equal(fetchedPayload.agent_id, "agent-a");
-    assert.deepEqual(fetchedPayload.metadata, { source: "review" });
+    const got = await tools.memory_get.handler({ id });
+    assert.equal(got.isError, undefined);
+    const record = got.structuredContent as Record<string, unknown>;
+    assert.equal(record.id, id);
+    assert.equal(record.content, "Round trip content");
+    assert.equal(record.type, "decision");
+    assert.deepEqual(record.tags, ["alpha", "beta"]);
+    assert.equal(record.agent_id, "agent-x");
+    assert.equal(record.importance, 4);
+    assert.deepEqual(record.metadata, { source: "test" });
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });
@@ -84,17 +74,13 @@ test("memory_search matches content via FTS and honors type filter", async () =>
   const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-search");
 
   try {
-    await tools.memory_save.handler({
+    insertMemory(toolDb, {
       content: "Checkout flow uses optimistic locking",
       type: "fact",
-      tags: [],
-      importance: 3,
     });
-    await tools.memory_save.handler({
+    insertMemory(toolDb, {
       content: "Decided to keep optimistic locking after the incident",
       type: "decision",
-      tags: [],
-      importance: 3,
     });
 
     const all = await tools.memory_search.handler({
@@ -249,14 +235,13 @@ test("memory_update patches tags and metadata without clobbering other fields", 
   const { toolDb, toolDir, tools } = await makeMemoryToolHarness("memory-update");
 
   try {
-    const saved = await tools.memory_save.handler({
+    const memoryId = insertMemory(toolDb, {
       content: "original content",
       type: "fact",
       tags: ["keep", "drop"],
       importance: 2,
       metadata: { a: 1, b: 2 },
     });
-    const memoryId = (saved.structuredContent as { id: string }).id;
 
     const noFields = await tools.memory_update.handler({ id: memoryId });
     assert.equal(noFields.isError, true);

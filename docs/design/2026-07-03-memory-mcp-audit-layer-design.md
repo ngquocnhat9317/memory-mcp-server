@@ -42,7 +42,7 @@ session start already returns a compact snippet of each related memory, which
 covers most "what was concluded and why" needs without replaying a trace. The
 audit tier competes with a cheaper automatic path that already works. See
 §8.1 and §8.1.1 of
-[2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md),
+`2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06 — merged into [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](./2026-10-06-spec-v1.4.0-tool-surface-reduction.md); full text in git history),
 where the reasoning read/audit tier is recorded as an open removal candidate.
 
 **How to use this document now:** as the historical record of why the audit

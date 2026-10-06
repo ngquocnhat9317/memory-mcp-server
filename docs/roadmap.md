@@ -14,58 +14,60 @@ already state.
 | `1.2.5` | Wave 2 — cut logging friction: batch `reasoning_add_step`, GUIDELINES rewritten around the task lifecycle, README rewritten as a landing page | *(predates the `docs/design/` spec set — see `CHANGELOG.md`)* |
 | `1.3.0` | Wave 3 + amendment — recall that stays right as the store grows: BM25 relevance ranking, provenance on `related_memories`, usage feedback decoupled from the telemetry gate, recall quality floor, workspace-aware ranking | [2026-07-11-spec-mcp-value-improvement.md](design/2026-07-11-spec-mcp-value-improvement.md), [2026-07-12-spec-recall-precision-workspace.md](design/2026-07-12-spec-recall-precision-workspace.md) |
 | `1.3.1` | Agent-guidance snippet installer: `install-agents` CLI subcommand and `scripts/install-agent-snippet.sh` (`curl \| bash`), both writing the README's Memory MCP snippet into global Claude Code / Codex CLI config | *(no design spec — ad hoc; see `CHANGELOG.md`)* |
-| `1.3.3` | Recall workspace identity + blended scoring on both recall surfaces — Option A in full: `workspace` parameter, `/`/home treated as unknown, cross-project gate with `preference` bypass, blended auto-recall score, stale-feedback exclusion, no lifeline; `memory_search` OR matching with a coverage floor and the same blended ranking computed in SQL (Option A′); recall eval base (WI-11, pulled forward from `1.4.0`) | [2026-10-05-spec-recall-workspace-identity.md](design/2026-10-05-spec-recall-workspace-identity.md), [2026-08-07-spec-zero-mem-inspired-recall.md](design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A / A′, [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) WI-11 |
-| `1.3.2` | Guide-contract alignment: `GUIDELINES.md` synced with real tool contracts (`v5`→`v6`→`v7`), server-level `instructions` field, tool description clarity pass, new docs-consistency test; conflict-check and mark-step guidance tightened from soft suggestions to concrete triggers after telemetry showed near-zero adoption | *(no design spec — ad hoc; see `CHANGELOG.md`; monitoring note in [2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md) §8.1)* |
+| `1.3.3` | Recall workspace identity + blended scoring on both recall surfaces — Option A in full: `workspace` parameter, `/`/home treated as unknown, cross-project gate with `preference` bypass, blended auto-recall score, stale-feedback exclusion, no lifeline; `memory_search` OR matching with a coverage floor and the same blended ranking computed in SQL (Option A′); recall eval base (WI-11, pulled forward from `1.4.0`) | [2026-10-05-spec-recall-workspace-identity.md](design/2026-10-05-spec-recall-workspace-identity.md), [2026-08-07-spec-zero-mem-inspired-recall.md](design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A / A′, eval cases in `src/__tests__/fixtures/recall-eval-cases.ts` (WI-11) |
+| `1.3.2` | Guide-contract alignment: `GUIDELINES.md` synced with real tool contracts (`v5`→`v6`→`v7`), server-level `instructions` field, tool description clarity pass, new docs-consistency test; conflict-check and mark-step guidance tightened from soft suggestions to concrete triggers after telemetry showed near-zero adoption | *(no design spec — ad hoc; see `CHANGELOG.md`; tool-usage evidence in [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md) §3.1)* |
 
 ## Planned / Next
 
-**Retargeted 2026-08-07** (owner direction, following Zero-Mem research): the
-work originally planned for `1.3.5` now ships as part of `1.4.0`; the work
-originally planned for `1.4.0` (Wave 4) now moves to `2.0.0`. No standalone
-`1.3.5` release ships. See each spec's revision history for the retarget
-record.
+**`1.3.3` is the last `1.3.x` release** — there is no `1.3.4` or `1.3.5`.
+The work once planned for `1.3.5` was merged into `1.4.0`, and Wave 4 moved
+to `2.0.0`.
 
 ### `1.4.0`
 
-Retargeted from `1.3.5` — recall refinements, joined by the low-usage tool
-removal. **WI-11 and Option A′ were pulled forward into `1.3.3`** (owner
-direction, 2026-10-05) and are listed under Shipped.
+**WI-11 and Option A′ shipped early in `1.3.3`** and are listed under
+Shipped. WI-10, WI-12, WI-13, WI-14 and WI-15 were evaluated and dropped as
+low-impact.
 
-- **WI-10** — provenance consistency
-- **WI-13** — duplicate-surfacing hint on `memory_save`
-- **WI-15** — memory-scope hygiene
-- **Low-usage tool removal** — gated on a 2-week re-check, see the gate
-  status below; a deliberate semver exception (breaking change on a minor
-  version, reasoned in the spec)
+- **WI-16 — remove 12 tools and delete the data only they read** (breaking,
+  deliberate semver exception). The tools: `reasoning_get_trace`,
+  `reasoning_list_sessions`, `reasoning_search_steps`,
+  `reasoning_list_milestones`, `reasoning_get_session_outline`,
+  `reasoning_mark_step`, `memory_list`, `memory_delete`, `memory_save`,
+  `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`.
+  - Eleven of them had 0 calls over the `GUIDELINES.md` v7 window
+    (2026-08-07 → 2026-10-04, 49 sessions).
+  - `reasoning_mark_step` is called, but nothing ever reads its data.
+  - A migration drops `reasoning_step_marks`. Reasoning steps and their FTS
+    index stay, because WI-20 reads them.
+  - With WI-20, 9 tools remain, and `tools/list` drops from 27,484 to about
+    16,300 characters (about −41%).
+  - The guide moves pivotal decisions into the conclusion, and wrong memories
+    are flagged `stale` instead of deleted.
+- **WI-17 — trim `memory_update` / `memory_search` descriptions.** Description
+  strings only; a few hundred characters saved.
+- **WI-18 — record recalled memory ids per session.** Migration adds
+  `reasoning_sessions.recalled_memory_ids`; a documented SQL query gives a
+  per-session recall used-rate. Additive and invisible to agents. Its first 20
+  sessions on 1.4.0 become the reference for later recall changes.
+- **WI-19 — query-aware recall snippet.** The snippet shows the part of the
+  memory that matched the title; ranking is unchanged. Ships in 1.4.0 together
+  with WI-18.
+- **WI-20 — `reasoning_find`.** One retrieval tool replaces
+  `reasoning_list_sessions`, `reasoning_search_steps` and
+  `reasoning_get_trace`:
+  - find mode searches session titles, conclusions and step content;
+  - read mode returns a session's full trace.
+  
+  The guide states when to use it: when the user refers to earlier work that
+  the current context lacks. It is measured in the v9 policy window.
 
-WI-12 and WI-14 were evaluated and dropped (spec §8) — WI-14's second
-rejection reason was voided on 2026-08-07.
-
-Design specs:
-[2026-07-12-spec-v1.3.5-recall-refinements.md](design/2026-07-12-spec-v1.3.5-recall-refinements.md)
-(§8.1.2, §11 rev 0.7). WI-10 and WI-13 should add their eval cases to the
-`1.3.3` eval base (`src/__tests__/fixtures/recall-eval-cases.ts`).
-
-#### Tool removal gate — status as of 2026-08-07
-
-The standing policy (metric, thresholds, minimum sample) lives in
-`CLAUDE.md`/`AGENTS.md` § "Tool Surface Policy". This table is its first
-scheduled application, detailed in the `1.3.5` spec §8.1.2 above — navigation
-only.
-
-| | |
-|---|---|
-| Re-check window | 2026-08-07 → 2026-08-21 |
-| Metric | `tool_rate = calls in window / reasoning sessions opened in window × 100%` |
-| Thresholds | ≥30% keep · 5–30% review and improve · ≤5% remove |
-| Minimum sample | 20 reasoning sessions opened in the window |
-| Target version if removals proceed | `1.4.0` (semver exception) |
-| Candidate pool | `reasoning_get_trace`, `reasoning_list_sessions`, `reasoning_search_steps`, `reasoning_list_milestones`, `reasoning_get_session_outline`, `memory_list`, `memory_delete`, `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard` |
-
-`reasoning_get_trace`, `reasoning_list_sessions`, and `memory_delete` are
-actively promoted by `GUIDELINES.md` v7 (v8, 2026-10-05, keeps that guidance and starts a new Tool Surface Policy observation window — the window above was measured on v7) — a low reading
-on those three specifically should prompt checking `get_usage_guide` uptake
-before removing, not removal on the number alone.
+Design spec:
+[2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md)
+— evidence and the removal gate (§3), work items WI-16–WI-20 and acceptance criteria (§5),
+decisions (§10). The removal gate is the first application of the
+`AGENTS.md` § "Tool Surface Policy"; measurements come from the owner's
+dogfooding database (one operator).
 
 ### `2.0.0`
 
