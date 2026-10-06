@@ -352,7 +352,7 @@ test("get_usage_guide returns a stable versioned guide and records telemetry", a
     );
     assert.deepEqual(result.structuredContent, {
       guide_version: "2026-10-06.v9",
-      mcp_version: "1.3.3",
+      mcp_version: "1.4.0",
       path: "GUIDELINES.md",
       format: "markdown",
       content: expectedGuide,

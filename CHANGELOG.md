@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.4.0 (2026-10-06)
+
+Theme: a smaller tool surface — 12 unused tools removed, one retrieval tool added, recalled memories recorded per session. Design: [`docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md`](docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md).
+
+### Breaking
+
+- Removed 12 tools: `memory_save`, `memory_list`, `memory_delete`,
+  `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`,
+  `reasoning_get_trace`, `reasoning_list_sessions`, `reasoning_search_steps`,
+  `reasoning_list_milestones`, `reasoning_get_session_outline`,
+  `reasoning_mark_step`. Eleven had 0 calls over the `GUIDELINES.md` v7 window
+  (2026-08-07 → 2026-10-04, 49 sessions); `reasoning_mark_step` was called but
+  its data was never read.
+- **Data deleted on upgrade:** migration `0007` drops `reasoning_step_marks`.
+  Back up `~/.memory-mcp-server/memory.db` first if you want to keep it.
+- Migration notes: create memories with
+  `reasoning_complete_session(save_as_memory=true)`; correct them with
+  `memory_update`; flag wrong ones with
+  `memory_record_usage_feedback(usefulness='stale')`; read telemetry with SQL
+  on `tool_usage_events`; find or read past sessions with `reasoning_find`.
+  Re-run `npx @nhatnguyen9317/memory-mcp-server install-agents` to refresh the
+  installed agent snippet.
+
+### Added
+
+- `reasoning_find`: find past sessions by query (titles, conclusions, step
+  text) or read one session's full trace.
+- Recalled memory ids are recorded per session (migration `0008`); the
+  recall used-rate query is in `docs/architecture.md`.
+- Auto-recall snippets show the part of the memory that matched the title
+  when it lies beyond the first 160 characters.
+
+### Changed
+
+- `GUIDELINES.md` v9 (`2026-10-06.v9`): trace checkpoints and the three trace
+  questions, pending-conclusion handling, first-sentence rule, stale triggers,
+  defaults for type and importance; shorter (6,224 vs 8,787 characters).
+- Trimmed `memory_update` / `memory_search` descriptions.
+- `tools/list`: 27,484 → 16,223 characters (9 tools, was 20);
+  `memory_update` + `memory_search`: 3,283 → 2,772.
+
 ## 1.3.3 (2026-10-05)
 
 Theme: recall that respects project identity — fixes `reasoning_start_session` recalling other projects' memories, stale memories, and near-zero-relevance memories from the same project — and brings `memory_search` onto the same blended ranking, so multi-term searches stop returning nothing. Design: [`docs/design/2026-10-05-spec-recall-workspace-identity.md`](docs/design/2026-10-05-spec-recall-workspace-identity.md), [`docs/design/2026-08-07-spec-zero-mem-inspired-recall.md`](docs/design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A′.

@@ -16,58 +16,13 @@ already state.
 | `1.3.1` | Agent-guidance snippet installer: `install-agents` CLI subcommand and `scripts/install-agent-snippet.sh` (`curl \| bash`), both writing the README's Memory MCP snippet into global Claude Code / Codex CLI config | *(no design spec — ad hoc; see `CHANGELOG.md`)* |
 | `1.3.3` | Recall workspace identity + blended scoring on both recall surfaces — Option A in full: `workspace` parameter, `/`/home treated as unknown, cross-project gate with `preference` bypass, blended auto-recall score, stale-feedback exclusion, no lifeline; `memory_search` OR matching with a coverage floor and the same blended ranking computed in SQL (Option A′); recall eval base (WI-11, pulled forward from `1.4.0`) | [2026-10-05-spec-recall-workspace-identity.md](design/2026-10-05-spec-recall-workspace-identity.md), [2026-08-07-spec-zero-mem-inspired-recall.md](design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A / A′, eval cases in `src/__tests__/fixtures/recall-eval-cases.ts` (WI-11) |
 | `1.3.2` | Guide-contract alignment: `GUIDELINES.md` synced with real tool contracts (`v5`→`v6`→`v7`), server-level `instructions` field, tool description clarity pass, new docs-consistency test; conflict-check and mark-step guidance tightened from soft suggestions to concrete triggers after telemetry showed near-zero adoption | *(no design spec — ad hoc; see `CHANGELOG.md`; tool-usage evidence in [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md) §3.1)* |
+| `1.4.0` | Tool-surface reduction — 12 unused tools removed (`tools/list` 27,484 → 16,223 characters, 9 tools), `reasoning_find` replaces the trace/session/step readers, migration `0007` drops `reasoning_step_marks`, recalled memory ids recorded per session (`0008`) with a documented used-rate query, query-aware recall snippet, `GUIDELINES.md` v9 | [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md), [2026-10-06-v1.4.0-tool-surface-reduction.md](plans/2026-10-06-v1.4.0-tool-surface-reduction.md) |
 
 ## Planned / Next
 
 **`1.3.3` is the last `1.3.x` release** — there is no `1.3.4` or `1.3.5`.
 The work once planned for `1.3.5` was merged into `1.4.0`, and Wave 4 moved
 to `2.0.0`.
-
-### `1.4.0`
-
-**WI-11 and Option A′ shipped early in `1.3.3`** and are listed under
-Shipped. WI-10, WI-12, WI-13, WI-14 and WI-15 were evaluated and dropped as
-low-impact.
-
-- **WI-16 — remove 12 tools and delete the data only they read** (breaking,
-  deliberate semver exception). The tools: `reasoning_get_trace`,
-  `reasoning_list_sessions`, `reasoning_search_steps`,
-  `reasoning_list_milestones`, `reasoning_get_session_outline`,
-  `reasoning_mark_step`, `memory_list`, `memory_delete`, `memory_save`,
-  `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`.
-  - Eleven of them had 0 calls over the `GUIDELINES.md` v7 window
-    (2026-08-07 → 2026-10-04, 49 sessions).
-  - `reasoning_mark_step` is called, but nothing ever reads its data.
-  - A migration drops `reasoning_step_marks`. Reasoning steps and their FTS
-    index stay, because WI-20 reads them.
-  - With WI-20, 9 tools remain, and `tools/list` drops from 27,484 to about
-    16,300 characters (about −41%).
-  - The guide moves pivotal decisions into the conclusion, and wrong memories
-    are flagged `stale` instead of deleted.
-- **WI-17 — trim `memory_update` / `memory_search` descriptions.** Description
-  strings only; a few hundred characters saved.
-- **WI-18 — record recalled memory ids per session.** Migration adds
-  `reasoning_sessions.recalled_memory_ids`; a documented SQL query gives a
-  per-session recall used-rate. Additive and invisible to agents. Its first 20
-  sessions on 1.4.0 become the reference for later recall changes.
-- **WI-19 — query-aware recall snippet.** The snippet shows the part of the
-  memory that matched the title; ranking is unchanged. Ships in 1.4.0 together
-  with WI-18.
-- **WI-20 — `reasoning_find`.** One retrieval tool replaces
-  `reasoning_list_sessions`, `reasoning_search_steps` and
-  `reasoning_get_trace`:
-  - find mode searches session titles, conclusions and step content;
-  - read mode returns a session's full trace.
-  
-  The guide states when to use it: when the user refers to earlier work that
-  the current context lacks. It is measured in the v9 policy window.
-
-Design spec:
-[2026-10-06-spec-v1.4.0-tool-surface-reduction.md](design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md)
-— evidence and the removal gate (§3), work items WI-16–WI-20 and acceptance criteria (§5),
-decisions (§10). The removal gate is the first application of the
-`AGENTS.md` § "Tool Surface Policy"; measurements come from the owner's
-dogfooding database (one operator).
 
 ### `2.0.0`
 
