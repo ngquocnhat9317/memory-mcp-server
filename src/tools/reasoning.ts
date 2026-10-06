@@ -400,6 +400,15 @@ Examples:
           params.title,
           workspace
         );
+        if (relatedMemories.length > 0) {
+          try {
+            activeDb
+              .prepare(`UPDATE reasoning_sessions SET recalled_memory_ids = ? WHERE id = ?`)
+              .run(JSON.stringify(relatedMemories.map((memory) => memory.id)), id);
+          } catch {
+            // Measurement is best-effort; it must never block session creation.
+          }
+        }
 
         const output = {
           session_id: id,

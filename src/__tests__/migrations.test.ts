@@ -57,6 +57,7 @@ test("runMigrations records all registered migrations after creating the baselin
         "0005_memory_workspace",
         "0006_workspace_identity",
         "0007_drop_reasoning_step_marks",
+        "0008_session_recalled_memory_ids",
       ]
     );
   } finally {

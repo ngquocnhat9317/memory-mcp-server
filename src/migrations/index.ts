@@ -7,6 +7,7 @@ import { migration0004ToolUsageEvents } from "./0004_tool_usage_events.js";
 import { migration0005MemoryWorkspace } from "./0005_memory_workspace.js";
 import { migration0006WorkspaceIdentity } from "./0006_workspace_identity.js";
 import { migration0007DropReasoningStepMarks } from "./0007_drop_reasoning_step_marks.js";
+import { migration0008SessionRecalledMemoryIds } from "./0008_session_recalled_memory_ids.js";
 
 export interface Migration {
   version: string;
@@ -21,6 +22,7 @@ const migrations: Migration[] = [
   migration0005MemoryWorkspace,
   migration0006WorkspaceIdentity,
   migration0007DropReasoningStepMarks,
+  migration0008SessionRecalledMemoryIds,
 ];
 
 export function runMigrations(db: DatabaseSync): void {
