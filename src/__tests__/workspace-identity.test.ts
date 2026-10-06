@@ -13,6 +13,7 @@ import { migration0003ReasoningStepsFts } from "../migrations/0003_reasoning_ste
 import { migration0004ToolUsageEvents } from "../migrations/0004_tool_usage_events.js";
 import { migration0005MemoryWorkspace } from "../migrations/0005_memory_workspace.js";
 import { toRecallTerms } from "../utils.js";
+import { saveConclusion } from "./fixtures/memory-seed.js";
 
 function makeWorkspaceDbPath(name: string): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-memory-mcp-"));
@@ -48,31 +49,6 @@ async function makeHarness(name: string): Promise<{
   const tools = (server as unknown as { _registeredTools: RegisteredToolMap })
     ._registeredTools;
   return { toolDb, toolDir, tools };
-}
-
-async function saveConclusion(
-  tools: RegisteredToolMap,
-  db: DatabaseSync,
-  workspace?: string
-): Promise<string | null> {
-  const started = await tools.reasoning_start_session.handler({
-    title: "workspace stamping",
-    ...(workspace !== undefined ? { workspace } : {}),
-  });
-  const sessionId = (started.structuredContent as { session_id: string }).session_id;
-  await tools.reasoning_add_step.handler({ session_id: sessionId, thought: "t" });
-  const done = await tools.reasoning_complete_session.handler({
-    session_id: sessionId,
-    conclusion: "stamped",
-    status: "completed",
-    save_as_memory: true,
-  });
-  const memoryId = (done.structuredContent as { memory_id: string }).memory_id;
-  return (
-    db.prepare(`SELECT workspace FROM memories WHERE id = ?`).get(memoryId) as {
-      workspace: string | null;
-    }
-  ).workspace;
 }
 
 function cleanup(toolDb: DatabaseSync, toolDir: string): void {

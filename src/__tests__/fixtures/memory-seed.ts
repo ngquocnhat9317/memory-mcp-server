@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -15,8 +16,9 @@ export interface SeedMemory {
 }
 
 /**
- * Inserts a memory row directly (memories_fts is kept in sync by triggers).
- * Replaces memory_save as a test fixture now that the tool is gone.
+ * Inserts a memory row straight into the memories table and returns its id.
+ * memories_fts stays in sync through the table triggers, so tests can seed
+ * memories without going through a tool.
  */
 export function insertMemory(db: DatabaseSync, seed: SeedMemory): string {
   const id = seed.id ?? `mem_${randomUUID()}`;
@@ -37,4 +39,44 @@ export function insertMemory(db: DatabaseSync, seed: SeedMemory): string {
     seed.updatedAt ?? seed.createdAt ?? now
   );
   return id;
+}
+
+type ToolHandlers = Record<
+  string,
+  {
+    handler: (params: Record<string, unknown>) => Promise<{
+      structuredContent?: Record<string, unknown>;
+      isError?: boolean;
+      content: Array<{ type: "text"; text: string }>;
+    }>;
+  }
+>;
+
+/** Returns the workspace stamped on a memory saved through a completed reasoning session. */
+export async function saveConclusion(
+  tools: ToolHandlers,
+  db: DatabaseSync,
+  workspace?: string
+): Promise<string | null> {
+  const started = await tools.reasoning_start_session.handler({
+    title: "workspace stamping",
+    ...(workspace !== undefined ? { workspace } : {}),
+  });
+  assert.equal(started.isError, undefined, started.content[0]?.text);
+  const sessionId = (started.structuredContent as { session_id: string }).session_id;
+  const step = await tools.reasoning_add_step.handler({ session_id: sessionId, thought: "t" });
+  assert.equal(step.isError, undefined, step.content[0]?.text);
+  const done = await tools.reasoning_complete_session.handler({
+    session_id: sessionId,
+    conclusion: "stamped",
+    status: "completed",
+    save_as_memory: true,
+  });
+  assert.equal(done.isError, undefined, done.content[0]?.text);
+  const memoryId = (done.structuredContent as { memory_id: string }).memory_id;
+  return (
+    db.prepare(`SELECT workspace FROM memories WHERE id = ?`).get(memoryId) as {
+      workspace: string | null;
+    }
+  ).workspace;
 }
