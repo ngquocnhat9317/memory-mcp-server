@@ -14,29 +14,29 @@ export const MemorySearchInputSchema = z
       .string()
       .min(1, "query must be at least 1 character")
       .max(300)
-      .describe("Free-text search query, matched against content and tags."),
+      .describe("Words to look for in content and tags."),
     type: MemoryTypeEnum.optional().describe(
-      "Restrict results to a single memory type."
+      "Only this memory type."
     ),
     agent_id: z.string().max(100).optional().describe("Filter by agent_id."),
     tags: z
       .array(z.string())
       .max(20)
       .optional()
-      .describe("Only return memories that contain ALL of these tags."),
+      .describe("Must contain all of these tags."),
     limit: z
       .number()
       .int()
       .min(1)
       .max(200)
       .default(20)
-      .describe("Maximum results to return (default 20, max 200)."),
+      .describe("Max results."),
     offset: z
       .number()
       .int()
       .min(0)
       .default(0)
-      .describe("Number of results to skip, for pagination."),
+      .describe("Results to skip."),
   })
   .strict();
 export type MemorySearchInput = z.infer<typeof MemorySearchInputSchema>;
@@ -53,38 +53,38 @@ export type MemoryGetInput = z.infer<typeof MemoryGetInputSchema>;
 // in the tool handler instead.
 export const MemoryUpdateInputSchema = z
   .object({
-    id: z.string().min(1).describe("The memory id to update."),
+    id: z.string().min(1).describe("The memory id."),
     content: z
       .string()
       .min(1)
       .max(8000)
       .optional()
-      .describe("New content text, if changing it."),
-    type: MemoryTypeEnum.optional().describe("New memory type, if changing it."),
+      .describe("New content."),
+    type: MemoryTypeEnum.optional().describe("New type."),
     tags: z
       .array(z.string().min(1).max(50))
       .max(20)
       .optional()
-      .describe("Replaces the full tag list (not merged), if provided."),
+      .describe("Replaces all tags."),
     tags_append: z
       .array(z.string().min(1).max(50))
       .max(20)
       .optional()
-      .describe("Tags to append when not replacing the full tag list."),
+      .describe("Tags to add."),
     tags_remove: z
       .array(z.string().min(1).max(50))
       .max(20)
       .optional()
-      .describe("Tags to remove when not replacing the full tag list."),
-    importance: z.number().int().min(1).max(5).optional().describe("New importance, if changing it."),
+      .describe("Tags to remove."),
+    importance: z.number().int().min(1).max(5).optional().describe("New importance."),
     metadata: z
       .record(z.unknown())
       .optional()
-      .describe("Replaces the full metadata object (not merged), if provided."),
+      .describe("Replaces the whole metadata object."),
     metadata_patch: z
       .record(z.unknown())
       .optional()
-      .describe("Shallow metadata patch to merge when not replacing the full metadata object."),
+      .describe("Keys to merge into metadata (shallow)."),
   })
   .strict();
 export type MemoryUpdateInput = z.infer<typeof MemoryUpdateInputSchema>;

@@ -92,7 +92,7 @@ export function registerMemoryTools(
     {
       title: "Search Memories",
       description:
-        "Full-text search over saved memories (content and tags). Any query term may match; results are ranked by term coverage, text relevance and recency (queries with 3+ terms need at least 2 to match). Optional filters: type, agent_id, tags (results must contain all); paginate with limit (default 20, max 200) and offset.",
+        "Recall saved memories on a topic other than your session title (reasoning_start_session already recalls the title). Any query term may match; queries with 3+ terms need at least 2. Ranked by term coverage, relevance and recency.",
       inputSchema: MemorySearchInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -286,7 +286,7 @@ export function registerMemoryTools(
     {
       title: "Update Memory",
       description:
-        "Update one or more fields of an existing memory. Partial update: only the fields you pass change; omitted fields are preserved. `tags`/`metadata` replace the whole value — use `tags_append`/`tags_remove`/`metadata_patch` for incremental changes. At least one updatable field is required.",
+        "Correct a recalled memory that turned out wrong or outdated. Only the fields you pass change. `tags`/`metadata` replace the whole value; `tags_append`/`tags_remove`/`metadata_patch` change it incrementally. Pass at least one field.",
       inputSchema: MemoryUpdateInputSchema.shape,
       annotations: {
         readOnlyHint: false,

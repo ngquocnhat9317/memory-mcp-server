@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runMigrations } from "../migrations/index.js";
 import { registerMemoryTools } from "../tools/memory.js";
@@ -105,4 +107,39 @@ test("reasoning_find description states its trigger (AC-20.9)", () => {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+async function listTools() {
+  const { db, dir, server } = makeServer();
+  const client = new Client({ name: "measure", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const { tools } = await client.listTools();
+  await client.close();
+  await server.close();
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  return tools;
+}
+
+test("memory_update + memory_search entries fit the WI-17 budget (AC-17.1)", async () => {
+  const tools = await listTools();
+  const size = tools
+    .filter((t) => t.name === "memory_update" || t.name === "memory_search")
+    .reduce((sum, t) => sum + JSON.stringify(t).length, 0);
+  assert.ok(size <= 2983, `memory_update + memory_search = ${size} chars; budget 2983`);
+});
+
+test("memory_update still explains replace vs incremental fields (AC-17.3)", async () => {
+  const tools = await listTools();
+  const desc = tools.find((t) => t.name === "memory_update")?.description ?? "";
+  assert.match(desc, /`tags`\/`metadata` replace the whole value/);
+  assert.match(desc, /tags_append/);
+  assert.match(desc, /metadata_patch/);
+});
+
+test("tools/list fits the 1.4.0 budget (AC-16.9)", async () => {
+  const tools = await listTools();
+  const size = JSON.stringify(tools).length;
+  assert.ok(size <= 16700, `tools/list = ${size} chars; budget 16700`);
 });
