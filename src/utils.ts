@@ -148,11 +148,6 @@ export function compactSnippetText(text: string, max = 160): string {
   return compact.length > max ? `${compact.slice(0, max - 3)}...` : compact;
 }
 
-/** Escapes LIKE wildcards; pair with `ESCAPE '\'`. */
-export function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
-}
-
 /** Reverses the FTS quoting of toRecallTerms/toSearchTerms: `"to""k"*` -> `to"k`. */
 export function unquoteFtsTerm(term: string): string {
   return term.replace(/^"/, "").replace(/"\*?$/, "").replace(/""/g, '"');
@@ -171,7 +166,7 @@ export function wordPrefixPattern(word: string): RegExp {
  * Earliest case-insensitive word-prefix match of any word. Literal only:
  * FTS folds diacritics, this does not, so an FTS hit can return null here.
  */
-export function findFirstMatch(
+function findFirstMatch(
   text: string,
   words: string[]
 ): { index: number; length: number } | null {

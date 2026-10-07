@@ -37,6 +37,7 @@ function insertSession(
     conclusion?: string | null;
     status?: string;
     workspace?: string | null;
+    createdAt?: string;
     updatedAt: string;
   }
 ): void {
@@ -49,7 +50,7 @@ function insertSession(
     fields.status ?? "completed",
     fields.conclusion ?? null,
     fields.workspace ?? null,
-    fields.updatedAt,
+    fields.createdAt ?? fields.updatedAt,
     fields.updatedAt
   );
 }
@@ -124,14 +125,19 @@ test("reasoning_find ranks by distinct terms matched, then recency (AC-20.3)", a
 test("reasoning_find results carry the session workspace", async () => {
   const { db, dir, tools } = await makeHarness("find-workspace");
   try {
-    insertSession(db, "sess_ws", { title: "tapir plan", workspace: "/proj/a", updatedAt: "2026-10-02T00:00:00.000Z" });
+    insertSession(db, "sess_ws", {
+      title: "tapir plan",
+      workspace: "/proj/a",
+      createdAt: "2026-09-30T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    });
     insertStep(db, "sess_ws", 1, "first step");
     insertStep(db, "sess_ws", 2, "second step");
     insertSession(db, "sess_nows", { title: "tapir notes", updatedAt: "2026-10-01T00:00:00.000Z" });
     const byId = new Map((await find(tools, "tapir")).map((r) => [r.session_id, r]));
     assert.equal(byId.get("sess_ws")?.workspace, "/proj/a");
     assert.equal(byId.get("sess_ws")?.status, "completed");
-    assert.equal(byId.get("sess_ws")?.created_at, "2026-10-02T00:00:00.000Z");
+    assert.equal(byId.get("sess_ws")?.created_at, "2026-09-30T00:00:00.000Z");
     assert.equal(byId.get("sess_ws")?.updated_at, "2026-10-02T00:00:00.000Z");
     assert.equal(byId.get("sess_ws")?.step_count, 2);
     assert.equal(byId.get("sess_nows")?.step_count, 0);
@@ -446,6 +452,30 @@ test("reasoning_find records usage telemetry for find and read modes", async () 
   } finally {
     if (originalTelemetry === undefined) delete process.env.MEMORY_TELEMETRY;
     else process.env.MEMORY_TELEMETRY = originalTelemetry;
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find at the schema maximum limit stays within the response size cap", async () => {
+  const { db, dir, tools } = await makeHarness("find-max-size");
+  try {
+    for (let n = 1; n <= 10; n++) {
+      const id = `sess_big_${n}`;
+      insertSession(db, id, {
+        title: `condor ${"t".repeat(293)}`,
+        workspace: "w".repeat(500),
+        conclusion: `condor ${"c".repeat(3993)}`,
+        updatedAt: `2026-10-${String(n).padStart(2, "0")}T00:00:00.000Z`,
+      });
+      for (let s = 1; s <= 3; s++) insertStep(db, id, s, `condor ${"s".repeat(2000)}`);
+    }
+    const res = await tools.reasoning_find.handler({ query: "condor", limit: 10 });
+    assert.equal(res.isError, undefined);
+    assert.equal((res.structuredContent as { results: unknown[] }).results.length, 10);
+    const text = res.content[0]?.text ?? "";
+    assert.ok(!text.includes('"truncated": true'), `output overflowed: ${text.length} chars`);
+  } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }

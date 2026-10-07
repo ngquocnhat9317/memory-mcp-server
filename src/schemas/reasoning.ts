@@ -164,7 +164,7 @@ export const ReasoningFindInputSchema = z
       .number()
       .int()
       .min(1)
-      .max(20)
+      .max(10)
       .default(5)
       .describe("Find mode: max sessions returned."),
   })

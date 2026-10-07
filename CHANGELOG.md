@@ -89,7 +89,7 @@ Theme: guide-contract alignment — `GUIDELINES.md`, tool descriptions, and serv
 
 ### Notes
 
-- Live-store telemetry (`MEMORY_TELEMETRY=on`) showed the manual memory CRUD surface (`memory_save`/`search`/`list`/`delete`) and the entire reasoning audit tier (`reasoning_get_trace`/`list_sessions`/`search_steps`/`list_milestones`/`get_session_outline`/`mark_step`) at zero real-world calls, while the automatic recall → save → feedback pipeline shows a 63% memory reuse rate. Recorded as an owner monitoring decision in `docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06; superseded by the 1.4.0 spec) §8.1: keep observing with the tightened guide; remove the affected tools in a future release if usage stays near zero.
+- Live-store telemetry (`MEMORY_TELEMETRY=on`) showed the manual memory CRUD surface (`memory_save`/`search`/`list`/`delete`) and the entire reasoning audit tier (`reasoning_get_trace`/`list_sessions`/`search_steps`/`list_milestones`/`get_session_outline`/`mark_step`) at zero real-world calls, while the automatic recall → save → feedback pipeline shows a 63% memory reuse rate. Recorded as an owner monitoring decision in `docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md` §8.1 (removed 2026-10-06; superseded by the 1.4.0 spec): keep observing with the tightened guide; remove the affected tools in a future release if usage stays near zero.
 
 ## 1.3.1 (2026-07-14)
 

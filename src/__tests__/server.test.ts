@@ -21,6 +21,7 @@ test("server exposes its instructions string to clients on initialize", async ()
 
     assert.equal(client.getInstructions(), SERVER_INSTRUCTIONS);
     assert.match(client.getInstructions() ?? "", /reasoning_start_session/);
+    assert.match(client.getInstructions() ?? "", /reasoning_find/);
   } finally {
     await client.close();
     await server.close();

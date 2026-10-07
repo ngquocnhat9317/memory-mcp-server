@@ -13,7 +13,6 @@ import {
 import { RECALL_RECENCY_DAYS, RECALL_WEIGHTS } from "../constants.js";
 import type { MemoryRecord, MemoryRow } from "../types.js";
 import {
-  escapeLikePattern,
   nowIso,
   parseJsonArray,
   parseJsonObject,
@@ -37,6 +36,11 @@ function rowToRecord(row: MemoryRow): MemoryRecord {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+/** Escapes LIKE wildcards; pair with `ESCAPE '\'`. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
 function tagsFilterClauses(tags: string[] | undefined): {

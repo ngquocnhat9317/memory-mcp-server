@@ -109,7 +109,7 @@ Supporting modules used across layers:
 | `src/schemas/reasoning.ts` | zod input contracts for every `reasoning_*` tool |
 | `src/migrations/0001_initial.ts` … `0008_session_recalled_memory_ids.ts` | Individual, ordered schema migrations (see Section 5) |
 | `src/migrations/index.ts` | `runMigrations(db)` — applies pending migrations in order inside a transaction per migration, tracked in `schema_migrations` |
-| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`, and the recall eval suite `recall-eval` with its fixture in `fixtures/recall-eval-cases.ts`) |
+| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`, `reasoning-find`, `tool-surface`, `recall-snippet`, `recall-measurement`, and the recall eval suite `recall-eval` with its fixture in `fixtures/recall-eval-cases.ts`; `fixtures/memory-seed.ts` holds the seed helpers) |
 
 ## 4. Data Flow
 
@@ -123,7 +123,8 @@ The typical task lifecycle, and where each step reads or writes the database:
    `related_memories` in the response), writes the recalled ids to
    `reasoning_sessions.recalled_memory_ids` (best-effort, only when something
    was recalled), and **reads+writes** `reasoning_sessions` again to
-   auto-abandon any `in_progress` session older than `MEMORY_SESSION_TTL_HOURS`.
+   auto-abandon any `in_progress` session older than `MEMORY_SESSION_TTL_HOURS`
+   (it writes the placeholder conclusion "auto-abandoned: stale session").
 2. **`reasoning_add_step(session_id, ...)`** (single or batched, up to 20 per
    call) — **writes** sequentially-numbered rows to `reasoning_steps` inside
    one transaction per call.
@@ -135,9 +136,11 @@ The typical task lifecycle, and where each step reads or writes the database:
    independent of `MEMORY_TELEMETRY`).
 4. **`reasoning_find(query | session_id)`** (any time, when earlier work is
    referred to that the current context lacks) — **reads** `reasoning_sessions`
-   (title/conclusion word-prefix match) and `reasoning_steps` via
-   `reasoning_steps_fts`; with a `session_id` it returns that session's full
-   trace.
+   (title/conclusion word-prefix match; the auto-abandoned placeholder
+   conclusion is ignored when matching) and `reasoning_steps` via
+   `reasoning_steps_fts`. Sessions with no steps and no conclusion (or only
+   the placeholder) rank last. With a `session_id` it returns that session's
+   full trace.
 
 `memory_search` / `memory_get` / `memory_update` read and correct `memories`
 outside a session. Memories are created only by

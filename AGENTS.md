@@ -92,8 +92,10 @@ for low real-world usage, use this standing threshold (owner decision,
 - **A high `tool_rate` is necessary, not sufficient.** A tool whose output
   or stored data is never exploited — no agent-facing read path and no
   server-side use — is a removal candidate at any rate: being called without
-  being exploited only spends tokens. Data that no remaining tool or server
-  path reads is deleted with a migration, not kept "for later".
+  being exploited only spends tokens. Data that no remaining tool, server
+  path or documented measurement query (e.g. the recall used-rate query in
+  `docs/architecture.md`) reads is deleted with a migration, not kept "for
+  later".
 - **Removing a tool is a breaking change to the MCP tool surface** — it
   requires its own `MCP_VERSION`/`package.json` bump and `CHANGELOG.md` entry
   per the Release Process above, regardless of which version line it lands on.
