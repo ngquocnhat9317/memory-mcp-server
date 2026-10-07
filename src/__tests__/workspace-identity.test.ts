@@ -13,6 +13,7 @@ import { migration0003ReasoningStepsFts } from "../migrations/0003_reasoning_ste
 import { migration0004ToolUsageEvents } from "../migrations/0004_tool_usage_events.js";
 import { migration0005MemoryWorkspace } from "../migrations/0005_memory_workspace.js";
 import { toRecallTerms } from "../utils.js";
+import { saveConclusion } from "./fixtures/memory-seed.js";
 
 function makeWorkspaceDbPath(name: string): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-memory-mcp-"));
@@ -135,41 +136,19 @@ test("getWorkspace precedence is explicit, then MEMORY_WORKSPACE, then cwd (AC-1
   });
 });
 
-test("memory_save stores the explicit workspace, normalized (AC-10)", async () => {
+test("a saved conclusion stores the explicit workspace, normalized (AC-10)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("ws-save-explicit");
   try {
-    const saved = await tools.memory_save.handler({
-      content: "saved from an explicit project",
-      type: "fact",
-      importance: 3,
-      workspace: "/proj/x/",
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, "/proj/x");
+    assert.equal(await saveConclusion(tools, toolDb, "/proj/x/"), "/proj/x");
   } finally {
     cleanup(toolDb, toolDir);
   }
 });
 
-test("memory_save stores NULL when the workspace is unknown (AC-10)", async () => {
+test("a saved conclusion stores NULL when the workspace is unknown (AC-10)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("ws-save-unknown");
   try {
-    const saved = await tools.memory_save.handler({
-      content: "saved from an unknown project",
-      type: "fact",
-      importance: 3,
-      workspace: "/",
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, null);
+    assert.equal(await saveConclusion(tools, toolDb, "/"), null);
   } finally {
     cleanup(toolDb, toolDir);
   }
@@ -491,6 +470,81 @@ test("memories reported stale or unsafe are not recalled; used/ignored do not ex
     }
     const ids = await recall(tools, TITLE, "/proj/a");
     assert.deepEqual(ids.sort(), ["mem_clean", "mem_ignored", "mem_used"]);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
+
+test("a stale memory corrected with memory_update is recalled again", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-corrected");
+  try {
+    insertMemory(toolDb, {
+      id: "mem_fixed",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+    });
+    const fb = await tools.memory_record_usage_feedback.handler({
+      memory_id: "mem_fixed",
+      usefulness: "stale",
+    });
+    assert.equal(fb.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const updated = await tools.memory_update.handler({
+      id: "mem_fixed",
+      content: "payment gateway release checklist for staging, revised",
+    });
+    assert.equal(updated.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), ["mem_fixed"]);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
+
+test("a memory flagged stale after its last update stays excluded", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-after-update");
+  try {
+    insertMemory(toolDb, {
+      id: "mem_flagged",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+    });
+    const updated = await tools.memory_update.handler({
+      id: "mem_flagged",
+      content: "payment gateway release checklist for staging, revised",
+    });
+    assert.equal(updated.isError, undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const fb = await tools.memory_record_usage_feedback.handler({
+      memory_id: "mem_flagged",
+      usefulness: "stale",
+    });
+    assert.equal(fb.isError, undefined);
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
+  } finally {
+    cleanup(toolDb, toolDir);
+  }
+});
+
+test("a stale flag recorded at the same instant as the last update keeps the memory excluded", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("ws-stale-same-instant");
+  try {
+    const instant = "2026-09-01T00:00:00.000Z";
+    insertMemory(toolDb, {
+      id: "mem_tie",
+      content: "payment gateway release checklist for staging",
+      workspace: "/proj/a",
+      updatedAt: instant,
+    });
+    toolDb
+      .prepare(
+        `INSERT INTO tool_usage_events (id, created_at, mcp_version, tool_name, operation_type, access_type, status, memory_id, metadata)
+         VALUES (?, ?, '1.4.0', 'memory_record_usage_feedback', 'feedback', 'write', 'success', ?, '{"usefulness":"stale"}')`
+      )
+      .run("evt_tie", instant, "mem_tie");
+    assert.deepEqual(await recall(tools, TITLE, "/proj/a"), []);
   } finally {
     cleanup(toolDb, toolDir);
   }

@@ -6,7 +6,7 @@
 | Date | 2026-07-11 (revised 2026-08-07) |
 | Current MCP version | 1.3.2 (`src/constants.ts:6`) |
 | Target MCP version | 1.3.0 (Wave 3, shipped) |
-| Next direction | **v2.0.0** (Wave 4 — conditional candidate, retargeted from v1.4.0; only starts after the evidence gate in §9.3. v1.4.0 itself is now occupied by the retargeted 1.3.5 work items plus Option A — see [2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md) and [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md)) |
+| Next direction | **v2.0.0** (Wave 4 — conditional candidate, retargeted from v1.4.0; only starts after the evidence gate in §9.3. v1.4.0 itself is now occupied by the retargeted 1.3.5 work items plus Option A — see `2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06 — superseded by [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](./2026-10-06-spec-v1.4.0-tool-surface-reduction.md); its WI-10, WI-13 and WI-15 were dropped on 2026-10-05; full text in git history) and [2026-08-07-spec-zero-mem-inspired-recall.md](./2026-08-07-spec-zero-mem-inspired-recall.md)) |
 | Author | Claude (based on the owner's positioning brief) |
 | Scope | Wave 3 (v1.3.0): WI-1..3 code + WI-4..5 docs/growth · Wave 4 (v2.0.0): WI-6, WI-7 — candidates behind the gate (§9), joined by Zero-Mem-inspired Options B/C |
 
@@ -326,7 +326,7 @@ Measured after **4–6 weeks** of real v1.3.0 use (all read from the local `tool
 The 4–6 week window in §9.3 has now run. Scored from
 `~/.memory-mcp-server/memory.db` (296 `tool_usage_events` rows spanning
 2026-07-16 → 2026-08-07) during the spec review recorded in
-[2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md)
+`2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06 — superseded by [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](./2026-10-06-spec-v1.4.0-tool-surface-reduction.md); its WI-10, WI-13 and WI-15 were dropped on 2026-10-05; full text in git history)
 §8.1.1:
 
 | # | Condition | Threshold | Measured | Status |

@@ -3,28 +3,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ReasoningAddStepInputSchema,
   ReasoningCompleteSessionInputSchema,
-  ReasoningGetSessionOutlineInputSchema,
-  ReasoningGetTraceInputSchema,
-  ReasoningListMilestonesInputSchema,
-  ReasoningListSessionsInputSchema,
-  ReasoningMarkStepInputSchema,
-  ReasoningSearchStepsInputSchema,
+  ReasoningFindInputSchema,
   ReasoningStartSessionInputSchema,
   type ReasoningAddStepInput,
   type ReasoningCompleteSessionInput,
-  type ReasoningGetSessionOutlineInput,
-  type ReasoningGetTraceInput,
-  type ReasoningListMilestonesInput,
-  type ReasoningListSessionsInput,
-  type ReasoningMarkStepInput,
-  type ReasoningSearchStepsInput,
+  type ReasoningFindInput,
   type ReasoningStartSessionInput,
 } from "../schemas/reasoning.js";
 import type {
-  ReasoningMilestoneRecord,
-  ReasoningOutlineStepRecord,
-  ReasoningSearchStepRecord,
-  ReasoningStepMarkRow,
   ReasoningSessionRecord,
   ReasoningSessionRow,
   ReasoningStepRecord,
@@ -37,14 +23,18 @@ import {
   getWorkspace,
 } from "../constants.js";
 import {
+  buildMatchExcerpt,
+  buildRecallSnippet,
+  compactSnippetText,
   handleToolError,
   newId,
   nowIso,
   parseJsonArray,
   parseJsonObject,
-  toFtsQuery,
   toRecallTerms,
   toLimitedJson,
+  unquoteFtsTerm,
+  wordPrefixPattern,
 } from "../utils.js";
 import { recordToolUsageEvent, withTelemetry } from "./telemetry.js";
 
@@ -127,89 +117,6 @@ function runInTransaction<T>(
 }
 
 type ReasoningSessionListRow = ReasoningSessionRow & { step_count: number };
-type ReasoningSearchStepRow = ReasoningStepRecord & { agent_id: string | null };
-type ReasoningMilestoneRow = {
-  session_id: string;
-  step_id: string;
-  step_number: number;
-  mark_type: string;
-  note: string | null;
-  created_at: string;
-  thought: string | null;
-  action: string | null;
-  observation: string | null;
-};
-type ReasoningOutlineMarkedRow = ReasoningStepRecord & {
-  mark_type: string;
-  note: string | null;
-  mark_created_at: string;
-};
-
-function compactSnippetText(text: string): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-}
-
-function queryTokens(query: string): string[] {
-  return query
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((token) => token.toLowerCase());
-}
-
-function buildReasoningSnippet(step: ReasoningStepRecord, query: string): string {
-  const fields = [step.thought, step.action, step.observation];
-  const tokens = queryTokens(query);
-
-  if (tokens.length > 0) {
-    const matchingField = fields.find((field) => {
-      if (!field) return false;
-      const lower = field.toLowerCase();
-      return tokens.some((token) => lower.includes(token));
-    });
-    if (matchingField) return compactSnippetText(matchingField);
-  }
-
-  const source = step.thought ?? step.action ?? step.observation ?? "";
-  return compactSnippetText(source);
-}
-
-function stepToOutlineRecord(
-  step: ReasoningStepRecord,
-  mark_type: ReasoningOutlineStepRecord["mark_type"] = null,
-  note: string | null = null
-): ReasoningOutlineStepRecord {
-  const {
-    id,
-    session_id,
-    step_number,
-    thought,
-    action,
-    observation,
-    created_at,
-  } = step;
-  return {
-    id,
-    session_id,
-    step_number,
-    thought,
-    action,
-    observation,
-    created_at,
-    mark_type,
-    note,
-  };
-}
-
-function selectFallbackOutlineSteps(
-  steps: ReasoningStepRecord[]
-): ReasoningStepRecord[] {
-  if (steps.length <= 2) return steps;
-
-  const middleIndex = Math.floor((steps.length - 1) / 2);
-  return [steps[0], steps[middleIndex], steps[steps.length - 1]];
-}
 
 let defaultDatabasePromise: Promise<DatabaseSync> | null = null;
 
@@ -233,6 +140,9 @@ interface RelatedMemoryRecord {
   };
 }
 
+/** Conclusion written by abandonStaleSessions; carries no searchable content. */
+const AUTO_ABANDONED_CONCLUSION = "auto-abandoned: stale session";
+
 function abandonStaleSessions(database: DatabaseSync, now: string): number {
   if (SESSION_TTL_HOURS <= 0) return 0;
   const cutoff = new Date(
@@ -242,13 +152,17 @@ function abandonStaleSessions(database: DatabaseSync, now: string): number {
     .prepare(
       `UPDATE reasoning_sessions
        SET status = 'abandoned',
-           conclusion = COALESCE(conclusion, 'auto-abandoned: stale session'),
+           conclusion = COALESCE(conclusion, ?),
            updated_at = ?
        WHERE status = 'in_progress' AND updated_at < ?`
     )
-    .run(now, cutoff);
+    .run(AUTO_ABANDONED_CONCLUSION, now, cutoff);
   return Number(result.changes);
 }
+
+const FIND_DEFAULT_LIMIT = 5;
+const FIND_CONCLUSION_CHARS = 300;
+const FIND_EXCERPTS_PER_SESSION = 2;
 
 /** Candidate pool fetched by BM25 before the gate/score pass. */
 const RECALL_CANDIDATE_POOL = 50;
@@ -267,7 +181,8 @@ function recallRelatedMemories(
     // user preference (cross-project by nature), 0 = another project. With
     // a known workspace the pool is ordered by it first so home memories are
     // never crowded out of the candidate pool by other projects' BM25 hits.
-    // Memories already reported stale/unsafe are excluded outright.
+    // Memories reported stale/unsafe are excluded until they are updated
+    // after the report.
     const candidates = database
       .prepare(
         `SELECT m.rowid AS row_id, m.id, m.type, m.content, m.tags,
@@ -282,11 +197,12 @@ function recallRelatedMemories(
          JOIN (
            SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?
          ) f ON m.rowid = f.rowid
-         WHERE m.id NOT IN (
-           SELECT memory_id FROM tool_usage_events
-           WHERE operation_type = 'feedback' AND status = 'success'
-             AND memory_id IS NOT NULL
-             AND json_extract(metadata, '$.usefulness') IN ('stale', 'unsafe_to_use')
+         WHERE NOT EXISTS (
+           SELECT 1 FROM tool_usage_events e
+           WHERE e.memory_id = m.id
+             AND e.operation_type = 'feedback' AND e.status = 'success'
+             AND json_extract(e.metadata, '$.usefulness') IN ('stale', 'unsafe_to_use')
+             AND e.created_at >= m.updated_at
          )
          ORDER BY ${workspace === null ? "" : "workspace_priority DESC, "}f.rank ASC
          LIMIT ?`
@@ -380,7 +296,7 @@ function recallRelatedMemories(
         type: row.type,
         importance: row.importance,
         tags: parseJsonArray(row.tags),
-        snippet: compactSnippetText(row.content),
+        snippet: buildRecallSnippet(row.content, terms),
         ...(typeof sourceSessionId === "string" &&
         typeof sourceSessionTitle === "string"
           ? {
@@ -418,13 +334,13 @@ Args:
 
 Returns: JSON with the new session's id (pass it to reasoning_add_step and reasoning_complete_session), plus:
   - workspace: the resolved project workspace for this session, or null when unknown (then workspace_warning explains how to fix it).
-  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by a blend of term coverage, text relevance, workspace and recency; memories from other projects appear only when they match nearly the whole title (user preferences excepted); weak matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); pass source.session_id to reasoning_get_trace to replay how that conclusion was reached.
+  - related_memories: up to a few saved memories relevant to the title, auto-recalled by the server — ranked by a blend of term coverage, text relevance, workspace and recency; memories from other projects appear only when they match nearly the whole title (user preferences excepted); weak matches are filtered out, so a short or empty list is normal. Review them before starting work; if one helps, report it later via used_memory_ids on reasoning_complete_session. Memories persisted from a past reasoning session carry a 'source' field ({session_id, session_title, created_at}); the source says which session produced the memory and when; read that session with reasoning_find(session_id) when the snippet is not enough.
   - open_sessions / open_sessions_warning: other in_progress sessions. Close the ones you opened and finished; leave sessions you don't recognize alone (they may belong to another agent or run).
   - auto_abandoned_sessions: count of stale in_progress sessions the server just cleaned up, if any.
 
 Examples:
   - Use when: starting to debug a complex issue, plan a multi-step task, or work through a decision with tradeoffs.
-  - Don't use when: the answer is a single simple lookup (just use memory_save/memory_search directly).`,
+  - Don't use when: the answer is a single simple lookup (use memory_search directly).`,
       inputSchema: ReasoningStartSessionInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -490,6 +406,15 @@ Examples:
           params.title,
           workspace
         );
+        if (relatedMemories.length > 0) {
+          try {
+            activeDb
+              .prepare(`UPDATE reasoning_sessions SET recalled_memory_ids = ? WHERE id = ?`)
+              .run(JSON.stringify(relatedMemories.map((memory) => memory.id)), id);
+          } catch {
+            // Measurement is best-effort; it must never block session creation.
+          }
+        }
 
         const output = {
           session_id: id,
@@ -499,7 +424,7 @@ Examples:
           ...(workspace === null
             ? {
                 workspace_warning:
-                  "Project workspace could not be determined (the server's working directory is '/', your home directory, or unset), so recall cannot prefer this project's memories. Pass workspace=<absolute project path> to reasoning_start_session and memory_save.",
+                  "Project workspace could not be determined (the server's working directory is '/', your home directory, or unset), so recall cannot prefer this project's memories. Pass workspace=<absolute project path> to reasoning_start_session.",
               }
             : {}),
           related_memories: relatedMemories,
@@ -563,7 +488,7 @@ Args:
 Returns: single mode — JSON with the new step's id and step_number; batch mode — JSON with steps: [{step_id, step_number}, ...] in insertion order.
 
 Error Handling:
-  - Returns an error if session_id does not exist (call reasoning_start_session first, or reasoning_list_sessions to find the right id).
+  - Returns an error if session_id does not exist (call reasoning_start_session first, or reasoning_find to look up an existing session).
   - Returns an error if the session is already 'completed' or 'abandoned'.`,
       inputSchema: ReasoningAddStepInputSchema.shape,
       annotations: {
@@ -676,7 +601,7 @@ Error Handling:
             content: [
               {
                 type: "text" as const,
-                text: `Error: Session '${params.session_id}' not found. Use reasoning_start_session to create one, or reasoning_list_sessions to find existing ids.`,
+                text: `Error: Session '${params.session_id}' not found. Use reasoning_start_session to create one, or reasoning_find to look up an existing session.`,
               },
             ],
             isError: true,
@@ -700,7 +625,7 @@ Error Handling:
             .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
           if (!lockedSession) {
             throw new Error(
-              `Session '${params.session_id}' not found. Use reasoning_start_session to create one, or reasoning_list_sessions to find existing ids.`
+              `Session '${params.session_id}' not found. Use reasoning_start_session to create one, or reasoning_find to look up an existing session.`
             );
           }
           if (lockedSession.status !== "in_progress") {
@@ -768,19 +693,19 @@ Error Handling:
   );
 
   server.registerTool(
-    "reasoning_get_trace",
+    "reasoning_find",
     {
-      title: "Get Reasoning Trace",
-      description: `Retrieve the full ordered trace of steps for a reasoning session, plus its status and conclusion (if completed).
+      title: "Find Past Reasoning",
+      description: `Find past work that your current context does not contain, then read it.
 
-Args:
-  - session_id (string, required): The session id.
+Call it when the user refers to earlier work, a past decision or a previous conversation you don't have ("last time…", "continue the unfinished…", "I already discussed…"), or when a recalled memory's source is not enough to know why that conclusion was reached.
 
-Returns: JSON with { session: {...}, steps: [{step_number, thought, action, observation, created_at}, ...] }.
+Pass exactly one of:
+  - query: searches past sessions' titles, conclusions and step text. Returns up to limit sessions (default 5), best match first, each with its conclusion and up to 2 matching step excerpts.
+  - session_id: returns that session's full ordered trace.
 
-Error Handling:
-  - Returns "Error: Session '<id>' not found" if the id does not exist.`,
-      inputSchema: ReasoningGetTraceInputSchema.shape,
+Find first, then read only the session that matters.`,
+      inputSchema: ReasoningFindInputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -791,617 +716,177 @@ Error Handling:
     withTelemetry(
       {
         database: databaseProvider,
-        toolName: "reasoning_get_trace",
+        toolName: "reasoning_find",
         operationType: "reasoning",
         accessType: "read",
-        buildEvent: (params: ReasoningGetTraceInput, result) => ({
-          sessionId: params.session_id,
-          outputShape: {
-            step_count: Array.isArray(result.structuredContent?.steps)
-              ? result.structuredContent.steps.length
-              : 0,
-          },
-        }),
-      },
-      async (params: ReasoningGetTraceInput) => {
-      try {
-        const activeDb = await resolveDatabase(database);
-        const sessionRow = activeDb
-          .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
-          .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
-        if (!sessionRow) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Error: Session '${params.session_id}' not found.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-        const stepRows = activeDb
-          .prepare(
-            `SELECT * FROM reasoning_steps WHERE session_id = ? ORDER BY step_number ASC`
-          )
-          .all(params.session_id) as Array<{
-          id: string;
-          session_id: string;
-          step_number: number;
-          thought: string | null;
-          action: string | null;
-          observation: string | null;
-          created_at: string;
-        }>;
-
-        const steps: ReasoningStepRecord[] = stepRows.map((row) => ({
-          id: row.id,
-          session_id: row.session_id,
-          step_number: row.step_number,
-          thought: row.thought,
-          action: row.action,
-          observation: row.observation,
-          created_at: row.created_at,
-        }));
-
-        const session = sessionRowToRecord(sessionRow, steps.length);
-        const output = { session, steps };
-        return {
-          content: [{ type: "text" as const, text: toLimitedJson(output) }],
-          structuredContent: output as unknown as Record<string, unknown>,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
-      }
-    )
-  );
-
-  server.registerTool(
-    "reasoning_list_sessions",
-    {
-      title: "List Reasoning Sessions",
-      description: `List reasoning sessions with optional filters, most recently updated first. Use this to find past sessions (e.g. to check if a similar task was already worked through) before retrieving a full trace.
-
-Args:
-  - agent_id (optional): Filter by agent.
-  - status ('in_progress'|'completed'|'abandoned', optional): Filter by status.
-  - limit (1-200, default 20), offset (default 0).
-
-Returns: JSON with { total_returned, has_more, next_offset, sessions: [{id, title, status, step_count, conclusion, ...}] }.`,
-      inputSchema: ReasoningListSessionsInputSchema.shape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    withTelemetry(
-      {
-        database: databaseProvider,
-        toolName: "reasoning_list_sessions",
-        operationType: "reasoning",
-        accessType: "read",
-        buildEvent: (params: ReasoningListSessionsInput, result) => ({
-          agentId: params.agent_id ?? null,
-          inputShape: {
-            has_agent_id: params.agent_id !== undefined,
-            status: params.status ?? null,
-            limit: params.limit,
-            offset: params.offset,
-          },
-          outputShape: {
-            result_count:
-              result.structuredContent?.total_returned ?? 0,
-            total: result.structuredContent?.total ?? 0,
-          },
-        }),
-      },
-      async (params: ReasoningListSessionsInput) => {
-      try {
-        const activeDb = await resolveDatabase(database);
-        const conditions: string[] = ["1=1"];
-        const sqlParams: Array<string | number> = [];
-        if (params.agent_id) {
-          conditions.push("agent_id = ?");
-          sqlParams.push(params.agent_id);
-        }
-        if (params.status) {
-          conditions.push("status = ?");
-          sqlParams.push(params.status);
-        }
-
-        const countRow = activeDb
-          .prepare(
-            `SELECT COUNT(*) as c FROM reasoning_sessions WHERE ${conditions.join(" AND ")}`
-          )
-          .get(...sqlParams) as { c: number };
-
-        const rows = activeDb
-          .prepare(
-            `SELECT
-               reasoning_sessions.*,
-               COUNT(reasoning_steps.id) AS step_count
-             FROM reasoning_sessions
-             LEFT JOIN reasoning_steps
-               ON reasoning_steps.session_id = reasoning_sessions.id
-             WHERE ${conditions.join(" AND ")}
-             GROUP BY reasoning_sessions.id
-             ORDER BY updated_at DESC LIMIT ? OFFSET ?`
-          )
-          .all(...sqlParams, params.limit, params.offset) as unknown as ReasoningSessionListRow[];
-
-        const sessions = rows.map((row) =>
-          sessionRowToRecord(row, row.step_count)
-        );
-        const hasMore = countRow.c > params.offset + sessions.length;
-        const output = {
-          total: countRow.c,
-          total_returned: sessions.length,
-          offset: params.offset,
-          has_more: hasMore,
-          ...(hasMore ? { next_offset: params.offset + sessions.length } : {}),
-          sessions,
-        };
-        return {
-          content: [{ type: "text" as const, text: toLimitedJson(output) }],
-          structuredContent: output as unknown as Record<string, unknown>,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
-      }
-    )
-  );
-
-  server.registerTool(
-    "reasoning_list_milestones",
-    {
-      title: "List Reasoning Milestones",
-      description:
-        "List marked reasoning steps for audit review without loading full traces.",
-      inputSchema: ReasoningListMilestonesInputSchema.shape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    withTelemetry(
-      {
-        database: databaseProvider,
-        toolName: "reasoning_list_milestones",
-        operationType: "reasoning",
-        accessType: "read",
-        buildEvent: (params: ReasoningListMilestonesInput, result) => ({
-          agentId: params.agent_id ?? null,
+        buildEvent: (params: ReasoningFindInput, result) => ({
           sessionId: params.session_id ?? null,
           inputShape: {
-            has_session_id: params.session_id !== undefined,
-            has_agent_id: params.agent_id !== undefined,
-            mark_type: params.mark_type ?? null,
-            limit: params.limit,
-            offset: params.offset,
-          },
-          outputShape: {
-            result_count: result.structuredContent?.total_returned ?? 0,
-            has_more: result.structuredContent?.has_more === true,
-          },
-        }),
-      },
-      async (params: ReasoningListMilestonesInput) => {
-      try {
-        const activeDb = await resolveDatabase(database);
-        const conditions = ["1=1"];
-        const sqlParams: Array<string | number> = [];
-
-        if (params.session_id) {
-          conditions.push("reasoning_steps.session_id = ?");
-          sqlParams.push(params.session_id);
-        }
-        if (params.agent_id) {
-          conditions.push("reasoning_sessions.agent_id = ?");
-          sqlParams.push(params.agent_id);
-        }
-        if (params.mark_type) {
-          conditions.push("reasoning_step_marks.mark_type = ?");
-          sqlParams.push(params.mark_type);
-        }
-
-        const countRow = activeDb
-          .prepare(
-            `SELECT COUNT(*) as c
-             FROM reasoning_step_marks
-             JOIN reasoning_steps
-               ON reasoning_steps.id = reasoning_step_marks.step_id
-             JOIN reasoning_sessions
-               ON reasoning_sessions.id = reasoning_steps.session_id
-             WHERE ${conditions.join(" AND ")}`
-          )
-          .get(...sqlParams) as { c: number };
-
-        const rows = activeDb
-          .prepare(
-            `SELECT
-               reasoning_steps.session_id,
-               reasoning_steps.id AS step_id,
-               reasoning_steps.step_number,
-               reasoning_step_marks.mark_type,
-               reasoning_step_marks.note,
-               reasoning_step_marks.created_at,
-               reasoning_steps.thought,
-               reasoning_steps.action,
-               reasoning_steps.observation
-             FROM reasoning_step_marks
-             JOIN reasoning_steps
-               ON reasoning_steps.id = reasoning_step_marks.step_id
-             JOIN reasoning_sessions
-               ON reasoning_sessions.id = reasoning_steps.session_id
-             WHERE ${conditions.join(" AND ")}
-             ORDER BY reasoning_step_marks.created_at ASC, reasoning_steps.step_number ASC
-             LIMIT ? OFFSET ?`
-          )
-          .all(...sqlParams, params.limit, params.offset) as unknown as ReasoningMilestoneRow[];
-
-        const results: ReasoningMilestoneRecord[] = rows.map((row) => ({
-          session_id: row.session_id,
-          step_id: row.step_id,
-          step_number: row.step_number,
-          mark_type: row.mark_type as ReasoningMilestoneRecord["mark_type"],
-          note: row.note,
-          created_at: row.created_at,
-          snippet: buildReasoningSnippet(
-            {
-              id: row.step_id,
-              session_id: row.session_id,
-              step_number: row.step_number,
-              thought: row.thought,
-              action: row.action,
-              observation: row.observation,
-              created_at: row.created_at,
-            },
-            row.note ?? row.mark_type
-          ),
-        }));
-
-        const hasMore = countRow.c > params.offset + results.length;
-        const output = {
-          total: countRow.c,
-          total_returned: results.length,
-          offset: params.offset,
-          has_more: hasMore,
-          ...(hasMore ? { next_offset: params.offset + results.length } : {}),
-          results,
-        };
-        return {
-          content: [{ type: "text" as const, text: toLimitedJson(output) }],
-          structuredContent: output as unknown as Record<string, unknown>,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
-      }
-    )
-  );
-
-  server.registerTool(
-    "reasoning_search_steps",
-    {
-      title: "Search Reasoning Steps",
-      description:
-        "Search reasoning steps across thought, action, and observation.",
-      inputSchema: ReasoningSearchStepsInputSchema.shape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    withTelemetry(
-      {
-        database: databaseProvider,
-        toolName: "reasoning_search_steps",
-        operationType: "reasoning",
-        accessType: "read",
-        buildEvent: (params: ReasoningSearchStepsInput, result) => ({
-          agentId: params.agent_id ?? null,
-          sessionId: params.session_id ?? null,
-          inputShape: {
-            query_length: params.query.length,
-            token_count: params.query.trim().split(/\s+/).filter(Boolean).length,
-            has_session_id: params.session_id !== undefined,
-            has_agent_id: params.agent_id !== undefined,
-            mark_type: params.mark_type ?? null,
-            limit: params.limit,
-            offset: params.offset,
+            mode: params.session_id !== undefined ? "read" : "find",
+            query_length: params.query?.length ?? 0,
+            limit: params.limit ?? FIND_DEFAULT_LIMIT,
           },
           outputShape: {
             result_count: Array.isArray(result.structuredContent?.results)
               ? result.structuredContent.results.length
               : 0,
-          },
-        }),
-      },
-      async (params: ReasoningSearchStepsInput) => {
-      try {
-        const activeDb = await resolveDatabase(database);
-        const conditions = [
-          "reasoning_steps.rowid IN (SELECT rowid FROM reasoning_steps_fts WHERE reasoning_steps_fts MATCH ?)",
-        ];
-        const sqlParams: Array<string | number> = [toFtsQuery(params.query)];
-
-        if (params.session_id) {
-          conditions.push("reasoning_steps.session_id = ?");
-          sqlParams.push(params.session_id);
-        }
-        if (params.agent_id) {
-          conditions.push("reasoning_sessions.agent_id = ?");
-          sqlParams.push(params.agent_id);
-        }
-        if (params.mark_type) {
-          conditions.push(
-            "EXISTS (SELECT 1 FROM reasoning_step_marks WHERE reasoning_step_marks.step_id = reasoning_steps.id AND reasoning_step_marks.mark_type = ?)"
-          );
-          sqlParams.push(params.mark_type);
-        }
-
-        const rows = activeDb
-          .prepare(
-            `SELECT
-               reasoning_steps.id,
-               reasoning_steps.session_id,
-               reasoning_steps.step_number,
-               reasoning_steps.thought,
-               reasoning_steps.action,
-               reasoning_steps.observation,
-               reasoning_steps.created_at,
-               reasoning_sessions.agent_id
-             FROM reasoning_steps
-             JOIN reasoning_sessions
-               ON reasoning_sessions.id = reasoning_steps.session_id
-             WHERE ${conditions.join(" AND ")}
-             ORDER BY reasoning_steps.created_at DESC, reasoning_steps.step_number DESC
-             LIMIT ? OFFSET ?`
-          )
-          .all(...sqlParams, params.limit, params.offset) as unknown as ReasoningSearchStepRow[];
-
-        const results: ReasoningSearchStepRecord[] = rows.map((row) => ({
-          ...row,
-          snippet: buildReasoningSnippet(row, params.query),
-        }));
-        const output = { results };
-        return {
-          content: [{ type: "text" as const, text: toLimitedJson(output) }],
-          structuredContent: output as unknown as Record<string, unknown>,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
-      }
-    )
-  );
-
-  server.registerTool(
-    "reasoning_get_session_outline",
-    {
-      title: "Get Reasoning Session Outline",
-      description:
-        "Return an audit-oriented outline for a session, using marked steps when present and a deterministic fallback otherwise.",
-      inputSchema: ReasoningGetSessionOutlineInputSchema.shape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    withTelemetry(
-      {
-        database: databaseProvider,
-        toolName: "reasoning_get_session_outline",
-        operationType: "reasoning",
-        accessType: "read",
-        buildEvent: (params: ReasoningGetSessionOutlineInput, result) => ({
-          sessionId: params.session_id,
-          inputShape: {
-            session_id_present: true,
-          },
-          outputShape: {
-            used_fallback: result.structuredContent?.used_fallback === true,
             step_count: Array.isArray(result.structuredContent?.steps)
               ? result.structuredContent.steps.length
               : 0,
           },
         }),
       },
-      async (params: ReasoningGetSessionOutlineInput) => {
-      try {
+      async (params: ReasoningFindInput) => {
         const activeDb = await resolveDatabase(database);
-        const sessionRow = activeDb
-          .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
-          .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
-        if (!sessionRow) {
+        if ((params.query === undefined) === (params.session_id === undefined)) {
           return {
             content: [
               {
                 type: "text" as const,
-                text: `Error: Session '${params.session_id}' not found.`,
+                text: "Error: Pass exactly one of query (find past sessions) or session_id (read one session).",
               },
             ],
             isError: true,
           };
         }
 
-        const stepRows = activeDb
-          .prepare(
-            `SELECT * FROM reasoning_steps WHERE session_id = ? ORDER BY step_number ASC`
-          )
-          .all(params.session_id) as unknown as ReasoningStepRecord[];
+        if (params.session_id !== undefined) {
+          const sessionRow = activeDb
+            .prepare(`SELECT * FROM reasoning_sessions WHERE id = ?`)
+            .get(params.session_id) as unknown as ReasoningSessionRow | undefined;
+          if (!sessionRow) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Error: Session '${params.session_id}' not found. Call reasoning_find with a query to look sessions up.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          const steps = activeDb
+            .prepare(
+              `SELECT id, session_id, step_number, thought, action, observation, created_at
+               FROM reasoning_steps WHERE session_id = ? ORDER BY step_number ASC`
+            )
+            .all(params.session_id) as unknown as ReasoningStepRecord[];
+          const output = {
+            mode: "read" as const,
+            session: {
+              ...sessionRowToRecord(sessionRow, steps.length),
+              workspace: sessionRow.workspace,
+            },
+            steps,
+          };
+          return {
+            content: [{ type: "text" as const, text: toLimitedJson(output) }],
+            structuredContent: output as unknown as Record<string, unknown>,
+          };
+        }
 
-        const markedRows = activeDb
-          .prepare(
-            `SELECT
-               reasoning_steps.id,
-               reasoning_steps.session_id,
-               reasoning_steps.step_number,
-               reasoning_steps.thought,
-               reasoning_steps.action,
-               reasoning_steps.observation,
-               reasoning_steps.created_at,
-               reasoning_step_marks.mark_type,
-               reasoning_step_marks.note,
-               reasoning_step_marks.created_at AS mark_created_at
-             FROM reasoning_step_marks
-             JOIN reasoning_steps
-               ON reasoning_steps.id = reasoning_step_marks.step_id
-             WHERE reasoning_steps.session_id = ?
-             ORDER BY reasoning_step_marks.created_at ASC, reasoning_steps.step_number ASC`
-          )
-          .all(params.session_id) as unknown as ReasoningOutlineMarkedRow[];
-
-        const session = sessionRowToRecord(sessionRow, stepRows.length);
-        const steps =
-          markedRows.length > 0
-            ? markedRows.map((row) =>
-                stepToOutlineRecord(
-                  row,
-                  row.mark_type as ReasoningOutlineStepRecord["mark_type"],
-                  row.note
-                )
-              )
-            : selectFallbackOutlineSteps(stepRows).map((row) =>
-                stepToOutlineRecord(row)
-              );
-
-        const output = {
-          session,
-          used_fallback: markedRows.length === 0,
-          steps,
+        const query = params.query as string;
+        const terms = toRecallTerms(query);
+        const words = terms.map(unquoteFtsTerm);
+        const matched = new Map<string, Set<number>>();
+        const markMatch = (sessionId: string, termIndex: number) => {
+          const set = matched.get(sessionId) ?? new Set<number>();
+          set.add(termIndex);
+          matched.set(sessionId, set);
         };
+        const stepMatches = activeDb.prepare(
+          `SELECT DISTINCT session_id FROM reasoning_steps
+           WHERE rowid IN (SELECT rowid FROM reasoning_steps_fts WHERE reasoning_steps_fts MATCH ?)`
+        );
+        const patterns = words.map(wordPrefixPattern);
+        const sessionTexts = activeDb
+          .prepare(`SELECT id, title, conclusion FROM reasoning_sessions`)
+          .all() as Array<{ id: string; title: string; conclusion: string | null }>;
+        terms.forEach((term, index) => {
+          for (const row of stepMatches.all(term) as Array<{ session_id: string }>) {
+            markMatch(row.session_id, index);
+          }
+          for (const row of sessionTexts) {
+            if (
+              patterns[index].test(row.title) ||
+              (row.conclusion !== null &&
+                row.conclusion !== AUTO_ABANDONED_CONCLUSION &&
+                patterns[index].test(row.conclusion))
+            ) {
+              markMatch(row.id, index);
+            }
+          }
+        });
+
+        let results: Array<Record<string, unknown>> = [];
+        if (matched.size > 0) {
+          const ids = [...matched.keys()];
+          const rows = activeDb
+            .prepare(
+              `SELECT reasoning_sessions.*, COUNT(reasoning_steps.id) AS step_count
+               FROM reasoning_sessions
+               LEFT JOIN reasoning_steps ON reasoning_steps.session_id = reasoning_sessions.id
+               WHERE reasoning_sessions.id IN (SELECT value FROM json_each(?))
+               GROUP BY reasoning_sessions.id`
+            )
+            .all(JSON.stringify(ids)) as unknown as ReasoningSessionListRow[];
+          const limit = params.limit ?? FIND_DEFAULT_LIMIT;
+          const excerptRows = activeDb.prepare(
+            `SELECT step_number, thought, action, observation FROM reasoning_steps
+             WHERE session_id = ?
+               AND rowid IN (SELECT rowid FROM reasoning_steps_fts WHERE reasoning_steps_fts MATCH ?)
+             ORDER BY step_number ASC LIMIT ?`
+          );
+          const anyTerm = terms.join(" OR ");
+          const isEmpty = (row: ReasoningSessionListRow) =>
+            Number(
+              row.step_count === 0 &&
+                (!row.conclusion || row.conclusion === AUTO_ABANDONED_CONCLUSION)
+            );
+          results = rows
+            .sort(
+              (a, b) =>
+                isEmpty(a) - isEmpty(b) ||
+                matched.get(b.id)!.size - matched.get(a.id)!.size ||
+                (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0) ||
+                (a.id < b.id ? -1 : 1)
+            )
+            .slice(0, limit)
+            .map((row) => {
+              const steps = excerptRows.all(row.id, anyTerm, FIND_EXCERPTS_PER_SESSION) as Array<{
+                step_number: number;
+                thought: string | null;
+                action: string | null;
+                observation: string | null;
+              }>;
+              return {
+                session_id: row.id,
+                title: row.title,
+                status: row.status,
+                workspace: row.workspace,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                step_count: row.step_count,
+                matched_terms: matched.get(row.id)!.size,
+                conclusion: row.conclusion
+                  ? compactSnippetText(row.conclusion, FIND_CONCLUSION_CHARS)
+                  : null,
+                excerpts: steps.map((step) => ({
+                  step_number: step.step_number,
+                  excerpt: buildMatchExcerpt(
+                    [step.thought, step.action, step.observation].filter(Boolean).join(" "),
+                    words
+                  ),
+                })),
+              };
+            });
+        }
+
+        const output = { mode: "find" as const, query, total_matched: matched.size, results };
         return {
           content: [{ type: "text" as const, text: toLimitedJson(output) }],
           structuredContent: output as unknown as Record<string, unknown>,
         };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
-      }
-    )
-  );
-
-  server.registerTool(
-    "reasoning_mark_step",
-    {
-      title: "Mark Reasoning Step",
-      description:
-        "Attach an audit marker to an existing reasoning step. Repeating the same step_id + mark_type updates the note instead of creating a duplicate mark.",
-      inputSchema: ReasoningMarkStepInputSchema.shape,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    withTelemetry(
-      {
-        database: databaseProvider,
-        toolName: "reasoning_mark_step",
-        operationType: "reasoning",
-        accessType: "write",
-        buildEvent: (params: ReasoningMarkStepInput, result) => ({
-          stepId: params.step_id,
-          inputShape: {
-            mark_type: params.mark_type,
-            note_present: params.note !== undefined,
-            note_length: params.note?.length ?? 0,
-          },
-          outputShape: {
-            step_id: result.structuredContent?.step_id ?? null,
-            mark_type: result.structuredContent?.mark_type ?? null,
-            note_present: result.structuredContent?.note !== null,
-          },
-        }),
-      },
-      async (params: ReasoningMarkStepInput) => {
-      try {
-        const activeDb = await resolveDatabase(database);
-        const step = activeDb
-          .prepare(`SELECT id FROM reasoning_steps WHERE id = ?`)
-          .get(params.step_id) as { id: string } | undefined;
-        if (!step) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Error: Step '${params.step_id}' not found.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const ts = nowIso();
-        activeDb
-          .prepare(
-            `INSERT INTO reasoning_step_marks (id, step_id, mark_type, note, created_at)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(step_id, mark_type)
-             DO UPDATE SET note = CASE
-               WHEN ? THEN excluded.note
-               ELSE reasoning_step_marks.note
-             END`
-          )
-          .run(
-            newId("mark"),
-            params.step_id,
-            params.mark_type,
-            params.note ?? null,
-            ts,
-            params.note !== undefined ? 1 : 0
-          );
-
-        const mark = activeDb
-          .prepare(
-            `SELECT id, step_id, mark_type, note, created_at
-             FROM reasoning_step_marks
-             WHERE step_id = ? AND mark_type = ?`
-          )
-          .get(params.step_id, params.mark_type) as unknown as ReasoningStepMarkRow;
-
-        const output = {
-          step_id: mark.step_id,
-          mark_type: mark.mark_type as ReasoningMarkStepInput["mark_type"],
-          note: mark.note,
-        };
-        return {
-          content: [{ type: "text" as const, text: toLimitedJson(output) }],
-          structuredContent: output,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: handleToolError(error) }],
-          isError: true,
-        };
-      }
       }
     )
   );

@@ -451,17 +451,6 @@ test("used_memory_ids feedback persists when telemetry is disabled", async () =>
       .prepare(`SELECT COUNT(*) as c FROM tool_usage_events`)
       .get() as { c: number };
     assert.equal(eventCount.c, 1, "error feedback event must not be recorded");
-
-    // Reports must self-describe the telemetry gap in their output.
-    const report = await tools.memory_usage_report.handler({
-      group_by: "tool_name",
-      limit: 50,
-    });
-    assert.equal(report.isError, undefined);
-    assert.match(
-      (report.structuredContent as { telemetry_note: string }).telemetry_note,
-      /MEMORY_TELEMETRY/
-    );
   } finally {
     if (originalTelemetry === undefined) {
       delete process.env.MEMORY_TELEMETRY;

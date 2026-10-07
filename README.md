@@ -11,7 +11,7 @@ told, and you maintain nothing.
 Long-term memory and reasoning traces for AI agents.
 
 - **Durable memory** across tasks and sessions (SQLite + full-text search)
-- **Reasoning traces**: per-task step-by-step records you can search and audit
+- **Reasoning traces**: per-task step-by-step records you can search
 - **Auto-recall**: starting a session automatically surfaces related memories
 - **Self-cleaning**: stale sessions are auto-abandoned instead of piling up
 
@@ -44,8 +44,7 @@ reasoning_start_session  title: "checkout intermittently times out under load"
 ```
 
 No one asked it to search. The Tuesday conclusion surfaces on its own, with its
-origin attached — and `reasoning_get_trace(source.session_id)` replays exactly
-how it was reached.
+origin attached — and `reasoning_find(source.session_id)` replays exactly how it was reached.
 
 ## Why this one?
 
@@ -56,14 +55,10 @@ makes the right behavior the default behavior:
 | | typical memory MCP | this server |
 | --- | --- | --- |
 | Recall | agent must remember to search | server auto-recalls related memories at session start |
-| Reasoning traces | — | first-class sessions with steps, marks, outlines |
+| Reasoning traces | — | first-class sessions with steps, searchable later with `reasoning_find` |
 | Stale state | grows forever | stale sessions auto-abandoned (configurable TTL) |
 
-For teams running **multiple agent personas**, there is also an opt-in telemetry
-layer (`MEMORY_TELEMETRY=on`) with usage reports, an adoption funnel, and
-per-agent scorecards to compare how each persona actually uses memory. If you
-run a single agent for yourself, you can ignore it — everything above works
-without it.
+For operators, an opt-in telemetry layer (`MEMORY_TELEMETRY=on`) records diagnostics events locally in `tool_usage_events` for SQL inspection. If you run a single agent for yourself, you can ignore it — everything above works without it.
 
 ## Quick Install
 
@@ -101,7 +96,7 @@ args = ["-y", "@nhatnguyen9317/memory-mcp-server"]
 ```
 
 Verify the connection by calling a cheap read-only tool such as `get_usage_guide`
-or `memory_list`.
+or `memory_search`.
 
 ## Requirements
 
@@ -122,16 +117,12 @@ or `memory_list`.
    (`MEMORY_SESSION_TTL_HOURS`, default 24).
 2. **During the task** — the agent logs decisions and observations with
    `reasoning_add_step` (single, or up to 20 steps per call in batch mode),
-   and can mark pivotal steps for later audit.
+   so later sessions can recover the work with `reasoning_find`.
 3. **Task end** — `reasoning_complete_session` records the conclusion,
    optionally saves it as durable memory, and accepts `used_memory_ids` so the
    server learns which recalled memories actually helped. This usage feedback
    is a local learning signal and is always recorded, regardless of the
    telemetry setting.
-4. **Optional, for multi-agent operators** — with `MEMORY_TELEMETRY=on`,
-   `memory_adoption_report` shows the funnel (sessions → completions → saves →
-   recalls → reuse) with risk flags, and `memory_agent_scorecard` compares
-   agent personas' habits and suggests corrections.
 
 Agents learn the rules at runtime by calling `get_usage_guide`, which returns
 the versioned [GUIDELINES.md](./GUIDELINES.md).
@@ -143,8 +134,8 @@ the versioned [GUIDELINES.md](./GUIDELINES.md).
 | `MEMORY_DB_PATH` | `~/.memory-mcp-server/memory.db` | SQLite database location |
 | `MEMORY_SESSION_TTL_HOURS` | `24` | Auto-abandon in_progress sessions older than this (`0` disables) |
 | `MEMORY_AUTO_RECALL_LIMIT` | `3` | Max related memories returned at session start (`0` disables) |
-| `MEMORY_WORKSPACE` | current working directory | Pins the workspace identity stamped on saved memories and used at recall time. Default: the server's working directory — but `/` and your home directory count as "unknown project". Agents should pass `workspace` (their project path) to `reasoning_start_session` / `memory_save`; that overrides this |
-| `MEMORY_TELEMETRY` | `off` | Set `on` to record diagnostics events locally (searches, saves, recalls, latency) — required for full data in the report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`). Usage feedback (`used_memory_ids`, `memory_record_usage_feedback`) is a learning signal, not diagnostics: it is always recorded locally, with this flag on or off |
+| `MEMORY_WORKSPACE` | current working directory | Pins the workspace identity stamped on saved memories and used at recall time. Default: the server's working directory — but `/` and your home directory count as "unknown project". Agents should pass `workspace` (their project path) to `reasoning_start_session`; that overrides this |
+| `MEMORY_TELEMETRY` | `off` | Set `on` to record diagnostics events locally (searches, saves, recalls, latency) for SQL inspection. Usage feedback (`used_memory_ids`, `memory_record_usage_feedback`) is a learning signal, not diagnostics: it is always recorded locally, with this flag on or off |
 
 ### Shared vs project-scoped memory
 
@@ -200,10 +191,11 @@ whether the task looks like it needs memory.
 
 - Non-trivial task (multi-step, debugging, planning, trade-offs)?
   `reasoning_start_session` first — review the `related_memories` it
-  returns before working; if one carries a `source`, you can replay its
-  origin with `reasoning_get_trace`.
-- Log meaningful steps with `reasoning_add_step` (batch mode `steps: [...]`
-  is fine for recording finished work).
+  returns before working; if one carries a `source`, read that session
+  with `reasoning_find(session_id)`. When the user refers to earlier work
+  you don't have, `reasoning_find(query)` finds it.
+- Log steps with `reasoning_add_step` (batch mode is fine): what you
+  checked, what you found, what you decided and why.
 - Always close with `reasoning_complete_session`; report helpful memories via
   `used_memory_ids`; pass `save_as_memory=true` for durable conclusions.
 - Never store secrets, tokens, or raw sensitive data.
@@ -216,15 +208,9 @@ whether the task looks like it needs memory.
 
 | Tool | Purpose |
 | --- | --- |
-| `memory_save` | Save a durable memory |
 | `memory_search` | Search memory content and tags |
-| `memory_list` | Browse memories with filters |
 | `memory_get` | Fetch one memory by id |
 | `memory_update` | Update an existing memory |
-| `memory_delete` | Delete a memory |
-| `memory_usage_report` | Aggregate tool usage telemetry |
-| `memory_adoption_report` | Adoption funnel + risk flags |
-| `memory_agent_scorecard` | Compare agent usage patterns |
 | `memory_record_usage_feedback` | Record whether recalled memory was useful |
 | `get_usage_guide` | Return the runtime usage guide |
 
@@ -234,18 +220,21 @@ whether the task looks like it needs memory.
 | --- | --- |
 | `reasoning_start_session` | Open a session (auto-recall + stale cleanup) |
 | `reasoning_add_step` | Append one step or a batch of steps |
-| `reasoning_get_trace` | Return the full ordered trace |
-| `reasoning_list_sessions` | List sessions with step counts |
-| `reasoning_mark_step` | Add/update an audit mark on a step |
-| `reasoning_search_steps` | Search reasoning steps |
-| `reasoning_list_milestones` | List marked steps across sessions |
-| `reasoning_get_session_outline` | Marked steps or deterministic outline |
+| `reasoning_find` | Find past sessions by query, or read one session's full trace |
 | `reasoning_complete_session` | Close a session; optional memory save + usage feedback |
+
+<!-- REMOVED_1_4_0_START -->
+> Removed in 1.4.0: `memory_save`, `memory_list`, `memory_delete`,
+> `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`,
+> `reasoning_get_trace`, `reasoning_list_sessions`, `reasoning_search_steps`,
+> `reasoning_list_milestones`, `reasoning_get_session_outline`,
+> `reasoning_mark_step`. See `CHANGELOG.md`.
+<!-- REMOVED_1_4_0_END -->
 
 ## Storage Model
 
 Tables: `memories`, `reasoning_sessions`, `reasoning_steps`,
-`reasoning_step_marks`, `tool_usage_events`, `schema_migrations` — plus FTS5
+`tool_usage_events`, `schema_migrations` — plus FTS5
 indexes `memories_fts` and `reasoning_steps_fts`.
 
 Migrations run automatically at server startup; upgrading the package never
@@ -262,7 +251,7 @@ npm run dev     # tsx watch src/index.ts
 
 - `src/db.ts` owns DB open and migration bootstrap
 - `src/tools/memory.ts` owns memory tool handlers
-- `src/tools/reasoning.ts` owns reasoning and audit tool handlers
+- `src/tools/reasoning.ts` owns reasoning tool handlers
 - `src/tools/usage-guide.ts` owns `get_usage_guide`
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.

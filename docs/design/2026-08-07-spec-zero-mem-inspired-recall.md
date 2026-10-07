@@ -4,7 +4,7 @@
 |---|---|
 | Document version | 0.6 (Single owner of the "blended scoring" work since 2026-08-07. Option A ships in full in 1.3.3: the auto-recall slice and the `memory_search` slice (retargeted as A′ on live evidence). B and C remain research-only candidates — see §6 and §7) |
 | Date | 2026-08-07 (rev 0.4–0.6: 2026-10-05) |
-| Relation to prior specs | Sibling to [2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md) (retargeted to v1.4.0 — see that doc's §11 revision 0.5) and [2026-07-11-spec-mcp-value-improvement.md](./2026-07-11-spec-mcp-value-improvement.md) §9 (Wave 4, retargeted to v2.0.0 — see that doc's §13 revision 0.4) |
+| Relation to prior specs | Sibling to `2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06 — superseded by [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](./2026-10-06-spec-v1.4.0-tool-surface-reduction.md); its WI-10, WI-13 and WI-15 were dropped on 2026-10-05; full text in git history) (retargeted to v1.4.0 — see that doc's §11 revision 0.5) and [2026-07-11-spec-mcp-value-improvement.md](./2026-07-11-spec-mcp-value-improvement.md) §9 (Wave 4, retargeted to v2.0.0 — see that doc's §13 revision 0.4) |
 | Current MCP version | 1.3.3 (`src/constants.ts`) |
 | Target MCP versions | Option A (auto-recall slice and A′) and its eval base WI-11 → 1.3.3 (A′ and WI-11 pulled forward from v1.4.0 by the owner on 2026-10-05). Options B and C → v2.0.0 candidates, gated the same way Wave 4's WI-6/WI-7 already are |
 | Origin | External research trigger: arXiv 2607.29377, "Zero-Mem: Zero-Token Memory Operations for LLM Agents" (Hong Kong Polytechnic University et al., submitted 2026-07-31), found via a TikTok summary and researched in full during this session |
@@ -52,7 +52,7 @@ The official Zero-Mem code (`github.com/TheMoon0815/Zero-mem`) is not yet public
 **What.** Bring `memory_search` onto the same model auto-recall already uses, computed in SQL:
 
 1. **Match with OR, not implicit AND.** Today `toFtsQuery` (`src/utils.ts`) joins prefix terms with spaces, which FTS5 treats as AND. On live data that returns zero results for 43% of 2-term, 65% of 3-term and 82% of 5-term queries; 3 of the 5 real `memory_search` calls on record returned nothing (§6.2). OR matching plus a coverage floor fixes recall without flooding results.
-2. **Rank by the shipped blended formula**, not a new one: coverage + normalized BM25 + recency, using the same `RECALL_RECENCY_DAYS` decay shape so the two recall surfaces cannot disagree. The workspace term is out of scope for A′ unless the owner asks for it — `memory_search` is an explicit query, and the 1.3.5 spec's WI-15 owns scope hygiene.
+2. **Rank by the shipped blended formula**, not a new one: coverage + normalized BM25 + recency, using the same `RECALL_RECENCY_DAYS` decay shape so the two recall surfaces cannot disagree. The workspace term is out of scope for A′ unless the owner asks for it — `memory_search` is an explicit query, and WI-15 (scope hygiene) of the 1.3.5 spec was dropped on 2026-10-05, so no work item owns it now.
 3. **Compute it in `ORDER BY`** so `LIMIT/OFFSET` stays correct (resolves C-3/OQ-4; see the design choice in OQ-4).
 
 **Why A′ instead of the original slice.** The original slice adds a signal that changes nothing users see (§6.1), which is exactly the C-2 failure in a different position. A′ changes something agents actually hit: whether a specific query returns anything at all.
@@ -72,7 +72,7 @@ The other two sites now point at this section instead of specifying it:
 | Prior owner | What it was called there | Status now |
 |---|---|---|
 | [2026-07-12-spec-recall-precision-workspace.md](./2026-07-12-spec-recall-precision-workspace.md) OQ-B | "a proper scoring mechanism is planned for v1.4.0 … a blended score would fold matched-terms, workspace, BM25, and possibly used-count into one formula" | Pointer only — constraint absorbed below as C-1 |
-| [2026-07-12-spec-v1.3.5-recall-refinements.md](./2026-07-12-spec-v1.3.5-recall-refinements.md) §8 | "the blended-score work" that WI-12/WI-14 defer into | Pointer only — constraint absorbed below as C-2 |
+| `2026-07-12-spec-v1.3.5-recall-refinements.md` (removed 2026-10-06 — superseded by [2026-10-06-spec-v1.4.0-tool-surface-reduction.md](./2026-10-06-spec-v1.4.0-tool-surface-reduction.md); its WI-10, WI-13 and WI-15 were dropped on 2026-10-05; full text in git history) §8 | "the blended-score work" that WI-12/WI-14 defer into | Pointer only — constraint absorbed below as C-2 |
 
 **Inherited design constraints — these are binding on Option A, not optional
 background.** Each was paid for by a prior review and would be expensive to

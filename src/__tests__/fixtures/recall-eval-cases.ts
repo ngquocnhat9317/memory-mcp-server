@@ -38,6 +38,8 @@ export interface EvalExpectation {
   paginationStableWithPageSize?: number;
   /** Recalled memory must carry this `source` block. */
   source?: { memoryId: string; sessionId: string; sessionTitle: string };
+  /** The recalled memory's snippet must contain this text. */
+  snippetContains?: { memoryId: string; text: string };
 }
 
 export interface RecallEvalCase {
@@ -282,5 +284,22 @@ export const RECALL_EVAL_CASES: RecallEvalCase[] = [
     query: "zzzunmatched qqqterm",
     seedMemories: [seed("mem_other", "unrelated note about onboarding")],
     expected: { empty: true },
+  },
+  {
+    description: "recall snippet shows a title-term match that sits past character 160",
+    tool: "recall",
+    query: "pangolin quarantine",
+    seedMemories: [
+      {
+        id: "mem_far_match",
+        content: `Weekly ops notes. ${"Routine maintenance entries with no relevant subject. ".repeat(5)}Decision: the pangolin quarantine stays until the vet signs off.`,
+        type: "decision",
+        tags: [],
+        importance: 3,
+        workspace: HOME_WORKSPACE,
+        updatedAt: daysAgo(1),
+      },
+    ],
+    expected: { top: "mem_far_match", snippetContains: { memoryId: "mem_far_match", text: "pangolin quarantine" } },
   },
 ];

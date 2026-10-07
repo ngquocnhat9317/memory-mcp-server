@@ -64,6 +64,7 @@ function seedMemories(db: DatabaseSync, evalCase: RecallEvalCase): void {
 interface RecalledRow {
   id: string;
   source?: { session_id: string; session_title: string };
+  snippet?: string;
 }
 
 async function runRecall(
@@ -132,6 +133,10 @@ for (const evalCase of RECALL_EVAL_CASES) {
         const row = rows.find((r) => r.id === expected.source!.memoryId);
         assert.equal(row?.source?.session_id, expected.source.sessionId);
         assert.equal(row?.source?.session_title, expected.source.sessionTitle);
+      }
+      if (expected.snippetContains) {
+        const row = rows.find((r) => r.id === expected.snippetContains!.memoryId);
+        assert.ok(row?.snippet?.includes(expected.snippetContains.text), `snippet: ${row?.snippet}`);
       }
       if (expected.paginationStableWithPageSize) {
         const size = expected.paginationStableWithPageSize;
