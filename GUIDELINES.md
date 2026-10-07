@@ -1,162 +1,123 @@
 # Memory MCP Guidelines
 
-Version: 2026-10-05.v8
+Version: 2026-10-06.v9
 
 This file is the single source of truth for how an agent should use this MCP.
-It is organized around the three moments of a task where this MCP matters.
 Tool schemas and descriptions are the source of truth for parameter contracts
 (required fields, types, enums); this guide covers policy — when and why.
+In short: a task's trace goes into a reasoning session; durable knowledge is
+the session's conclusion, saved by `reasoning_complete_session`.
 
 ## Moment 1 — Task Start
 
-1. Decide the task size first:
-   - Trivial one-step lookup: do NOT open a reasoning session and do NOT call
-     memory tools unless prior recall is genuinely needed. Stop here.
-     (Examples: read one config value, answer a question from context you
-     already have.)
-   - Anything multi-step, uncertain, or involving debugging, planning, review,
-     or trade-offs: call `reasoning_start_session` with a specific title.
-     (Examples: any bug hunt, any change touching more than one file.)
-     The title doubles as the recall query — favor concrete keywords
-     (component, module, error names) over generic phrasing.
-     Also pass `workspace` — the absolute path of the project directory you
-     are working in. The server's own working directory is often `/` or your
-     home directory when a desktop app launched it; those count as "unknown
-     project" and turn project scoping off. If the response shows
-     `workspace: null` with a `workspace_warning`, pass `workspace` on this
-     and later calls (`reasoning_start_session`, `memory_save`).
-2. Read what the server hands back — this is free recall, act on it:
-   - `related_memories`: saved knowledge matched to your title, ranked by
-     a blend of term coverage, text relevance, workspace and recency.
-     Memories from other projects appear only when they match nearly your
-     whole title (user `preference` memories are the exception). Weak matches
-     are filtered out, so an empty list is normal — do not pad the title just
-     to get results. Review
-     the snippets before working; fetch full content
-     with `memory_get` if needed. Entries persisted from a past reasoning
-     session carry a `source` field (`{session_id, session_title, created_at}`)
-     — when you need to verify how a conclusion was reached, replay its origin
-     with `reasoning_get_trace(source.session_id)`. Remember which ones
-     actually help — you will report them at completion.
-     If `related_memories` has 2 or more entries, do not act on the first one
-     blindly: skim all the snippets for contradictions before proceeding.
-       - Agree or don't overlap → use the most relevant one(s) directly.
-       - Conflict, or you're unsure → call
-         `reasoning_get_trace(source.session_id)` on the newer, same-workspace
-         one *before* deciding, not after. Once resolved, clean up the losing
-         memory with `memory_update` or `memory_delete`.
-   - `open_sessions_warning` / `open_sessions`: sessions left in_progress.
-     Close the ones YOU opened and finished with
-     `reasoning_complete_session`. Leave sessions you don't recognize alone —
-     they may belong to another agent or a parallel run; stale ones are
-     auto-abandoned by the server. A completed or abandoned session cannot be
-     reopened: to resume interrupted work, start a new session and reference
-     the old one in the title or an early step.
-3. Only call `memory_search` yourself when you need recall on a topic that is
-   NOT the session title (the server already searched the title for you).
+1. Decide the task size:
+   - Trivial one-step lookup (read one value, answer from context you
+     already have): no session, no memory calls. Stop here.
+   - Anything multi-step, uncertain, or involving debugging, planning, review
+     or trade-offs: call `reasoning_start_session`. The title is also the
+     recall query, so use concrete keywords (module, error, ticket names).
+     Pass `workspace` = the absolute path of your project; `/` and the home
+     directory count as unknown. If the response has a `workspace_warning`,
+     pass `workspace` to every later `reasoning_start_session`.
+   - The user's answer to a pending conclusion (a choice, a "go") starts a new
+     task. Open a session, short if needed, whose title names the decision.
+2. Read what comes back:
+   - `related_memories`: saved conclusions matched to your title. An empty
+     list is normal; do not pad the title. Snippets show the start of each
+     memory, plus the matching part when it lies further in; read one in full
+     with `memory_get`. A `source` says which session produced it; read that
+     session with `reasoning_find(session_id)` when the snippet is not enough
+     to know why. Note which ones help — you report them at the end.
+   - With 2 or more memories, skim them for contradictions first. If two
+     conflict: read both with `memory_get` and prefer the newer
+     same-workspace one. If the loser can be corrected, fix it with
+     `memory_update`; otherwise flag it stale (see Moment 3). A wrong memory
+     is corrected or flagged, never deleted. A stale flag removes the memory
+     from auto-recall until it is next corrected with `memory_update`; it
+     stays reachable through `memory_search`.
+   - `open_sessions`: close the ones you opened and finished; leave the others
+     alone. A closed session cannot be reopened: start a new one and name the
+     old one in the title.
+3. Recall beyond the title:
+   - `memory_search`: saved memories on a topic other than your title.
+   - `reasoning_find(query)`: when the user refers to earlier work, a past
+     decision or a previous conversation that your context does not contain
+     ("last time…", "continue the unfinished…"). Find first, then read only
+     the session that matters with `reasoning_find(session_id)`.
 
 ## Moment 2 — During The Task
 
 Every `reasoning_add_step` and `reasoning_complete_session` call requires the
-`session_id` returned by `reasoning_start_session`; `reasoning_mark_step`
-instead takes the `step_id` returned by `reasoning_add_step`.
+`session_id` returned by `reasoning_start_session`.
 
-- Log decisions, hypotheses, rejected options, conflicts, and meaningful
-  observations with `reasoning_add_step`. Routine mechanical actions do not
-  need steps. Within a step: `thought` = your reasoning, `action` = what you
-  did, `observation` = what resulted — fill whichever apply (at least one).
-- Prefer batch mode when it lowers friction: `reasoning_add_step` with
-  `steps: [{thought/action/observation}, ...]` logs up to 20 steps in one
-  call — ideal for recording a stretch of work you just finished instead of
-  pausing after every step. A post-hoc trace is far better than an empty one.
-- Mark pivotal steps with `reasoning_mark_step` in the same turn you log
-  them with `reasoning_add_step` — don't defer it, deferred marks get
-  forgotten. Call it whenever the step you just logged was any of: a choice
-  between alternatives (`decision`), an option you rejected (`decision`),
-  a genuine contradiction you found (`conflict`), an unverified guess you're
-  about to test (`hypothesis`), or a result that changed the direction of the
-  task (`milestone`). If none of these apply, skip it — not every step needs
-  a mark.
+Steps are the searchable record of how a task was done. When a later session
+has lost this context, `reasoning_find` searches your steps to recover it. The
+conclusion is a summary; it drops evidence, numbers and the options you
+rejected. A session with only a conclusion can be found, but not
+reconstructed.
+
+- A useful trace answers three questions for a future agent: what did you
+  check, what did you find, and what did you decide and why — including the
+  options you rejected. One to three steps usually cover a normal task. Skip
+  routine actions, not the whole trace.
+- Log a step (batch mode `steps: [...]` is fine) at these checkpoints:
+  - before you ask the user to choose or confirm something;
+  - when you present a plan or result;
+  - before `reasoning_complete_session`, if the trace does not yet answer
+    the three questions.
+- If you realise mid-task that the work is non-trivial, open the session
+  then, and first log what you have done so far as one batch.
+- Within a step: `thought` = your reasoning, `action` = what you did,
+  `observation` = what resulted; fill whichever apply.
 
 ## Moment 3 — Task End
 
 Always close the session with `reasoning_complete_session`:
 
-- `conclusion`: the actual answer/decision, written to be reusable. Required
-  even when abandoning — one line stating why the task was dropped is enough.
-- `used_memory_ids`: ids of memories (e.g. from `related_memories`) that
-  genuinely helped. Report honestly, including reporting none. This is the
-  "used" feedback path when you have a session; call
-  `memory_record_usage_feedback` directly instead when there is no session to
-  close, or the moment you discover a recalled memory is stale or wrong. A
-  failed report (e.g. an unknown memory id) returns a warning and is not
-  recorded.
-- Saving the conclusion as durable memory is opt-in: pass
-  `save_as_memory=true` or `memory_mode='always'`. The default (`auto`) does
-  NOT save on its own. Save when the conclusion would help a future task;
-  skip with `memory_mode='never'` (requires `not_saved_reason`) when it is
-  one-off noise.
-- When persisting, pick a `memory_type` (`fact`, `preference`, `episodic`,
-  `decision`, `reasoning_summary`) and a `memory_importance` (1–5 scale;
-  anchors: 5 = convention or decision affecting every task in the workspace,
-  3 = reusable pattern within one area, 1 = minor context note).
-- If the task was dropped without a real conclusion, complete with
-  `status='abandoned'` instead of leaving the session open.
+- `conclusion`: the answer or decision, written to be reused. Its first
+  sentence states the subject and the outcome; dates, sources and caveats come
+  after, because a recall snippet always shows the start. State the key
+  decisions and the options you rejected, with reasons. Required even when
+  abandoning — one line saying why is enough.
+- A conclusion that waits on the user is not final. When the answer comes,
+  record it: update the pending memory with `memory_update`, or flag it stale
+  and let the new session's conclusion replace it.
+- `used_memory_ids`: ids of recalled memories that genuinely helped. Report
+  honestly, including none.
+- Flag a memory with `memory_record_usage_feedback(usefulness='stale')` the
+  moment either happens:
+  - a recalled memory contradicts what you just verified in code or data and
+    you are not correcting it with `memory_update`;
+  - a decision you just recorded supersedes an older or pending memory.
+- Saving is opt-in: pass `save_as_memory=true` or `memory_mode='always'`; the
+  default (`auto`) does not save. Save when the conclusion would help a future
+  task; otherwise skip with `memory_mode='never'` (requires
+  `not_saved_reason`). This is the only way to create a memory.
+  `memory_tags`: tags describe topics ('sqlite', 'auth'), not projects.
+- Leave `memory_type` and `memory_importance` at their defaults, except
+  `memory_type='preference'` for a user preference that applies across
+  projects — the only type recall treats differently.
+- Dropped without a real conclusion? Complete with `status='abandoned'`.
 
 ## Tool Reference
 
-- `get_usage_guide`: returns this guide (with its version) at runtime
-
-Durable memory:
-
-- `memory_save`: store durable facts, decisions, preferences, or summaries.
-  Tags describe topics ('sqlite', 'auth', 'perf'), not locations — do not put
-  workspace or project names in tags. Pass `workspace` (your project
-  directory); if omitted the server records its own working directory (never
-  `/` or the home directory) and prefers same-workspace memories at recall time
-- `memory_search`: targeted recall by keyword, topic, or hypothesis
-- `memory_list`: recent or filtered browsing (when browsing beats searching)
-- `memory_get`: fetch one memory by exact id
-- `memory_update`: correct an existing memory in place
-- `memory_delete`: remove unsafe, duplicated, or wrong memory
-- `memory_record_usage_feedback`: record how a recalled memory turned out
-  (`used`, `ignored`, `irrelevant`, `stale`, `unsafe_to_use`) — prefer
-  `used_memory_ids` at completion for the common case; use this tool directly
-  for no-session tasks and for non-`used` reports
-
-Reasoning traces:
-
-- `reasoning_start_session` / `reasoning_add_step` / `reasoning_complete_session`:
-  the core loop described above
-- `reasoning_get_trace`: replay a session's full ordered trace
-- `reasoning_list_sessions`: find past sessions before retrieving a trace
-
-Audit & reports (mostly for reviewers and operators, not everyday tasks):
-
-- `reasoning_mark_step`, `reasoning_list_milestones`,
-  `reasoning_get_session_outline`, `reasoning_search_steps`: navigate traces
-  by their pivotal moments
-- `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`:
-  telemetry-backed views of how memory/reasoning is actually being used
-- Telemetry note: `MEMORY_TELEMETRY` is a server-side env var (`on`/`off`,
-  default `off`); agents cannot change it. Successful usage feedback and
-  session data are always recorded locally regardless of the setting — only
-  the full funnels and ratios in the reports above need `MEMORY_TELEMETRY=on`.
+- `get_usage_guide`: this guide.
+- `reasoning_start_session`, `reasoning_add_step`,
+  `reasoning_complete_session`: the core loop above.
+- `reasoning_find`: find past sessions (`query`) or read one (`session_id`).
+- `memory_search`, `memory_get`: recall beyond the title; read one memory.
+- `memory_update`: correct a memory.
+- `memory_record_usage_feedback`: report a stale or unsafe memory, or a use
+  outside a session.
+- `MEMORY_TELEMETRY` is a server-side env var (default `off`) that agents
+  cannot change. Usage feedback and session data are always recorded locally.
 
 ## Do Not Store
 
-This list applies to durable memory — `memory_save` and conclusions persisted
-via `save_as_memory`. Reasoning steps may summarize tool output briefly, but
-secrets are banned everywhere.
+Applies to conclusions saved as memory. Steps may summarize tool output
+briefly, but secrets are banned everywhere.
 
 - secrets, tokens, or credentials
 - full hidden chain-of-thought
 - transient debugging noise
 - raw tool dumps with no durable value
-
-## Rule Of Thumb
-
-- durable reusable knowledge -> `memory_*`
-- live multi-step task trace -> `reasoning_*`
-- when in doubt, skip storage unless the information will help a future agent
-  or future run

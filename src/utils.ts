@@ -31,12 +31,7 @@ export function parseJsonObject(
   }
 }
 
-/** FTS5 MATCH queries break on raw punctuation; wrap terms as a safe prefix query. */
-export function toFtsQuery(raw: string): string {
-  const terms = ftsTerms(raw);
-  return terms.length ? terms.join(" ") : '""';
-}
-
+/** Splits raw text into quoted-prefix FTS5 terms so punctuation cannot break MATCH. */
 function ftsTerms(raw: string): string[] {
   return raw
     .trim()
@@ -46,7 +41,7 @@ function ftsTerms(raw: string): string[] {
 }
 
 /**
- * memory_search terms: the same quoted-prefix terms as toFtsQuery, deduped
+ * memory_search terms: quoted-prefix FTS terms, deduped
  * case-insensitively so a repeated word cannot inflate the coverage floor.
  * Punctuation-only tokens ("-", "–", "/") never match anything, so they are
  * dropped rather than counted toward the floor. No stopword or length
@@ -137,7 +132,7 @@ export function handleToolError(error: unknown): string {
       return `Error: Invalid value provided (${error.message}). Check allowed ranges/enums in the tool description.`;
     }
     if (error.message.includes("FOREIGN KEY constraint failed")) {
-      return "Error: Referenced session_id does not exist. Use reasoning_start_session first, or check reasoning_list_sessions for valid IDs.";
+      return "Error: Referenced session_id does not exist. Use reasoning_start_session first, or reasoning_find to look up an existing session.";
     }
     if (error.message.includes("UNIQUE constraint failed")) {
       return "Error: A record with this identifier already exists.";
@@ -145,4 +140,109 @@ export function handleToolError(error: unknown): string {
     return `Error: ${error.message}`;
   }
   return `Error: Unexpected error occurred: ${String(error)}`;
+}
+
+/** Whitespace-collapsed text cut to `max` chars (default 160; "..." when cut). */
+export function compactSnippetText(text: string, max = 160): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length > max ? `${compact.slice(0, max - 3)}...` : compact;
+}
+
+/** Reverses the FTS quoting of toRecallTerms/toSearchTerms: `"to""k"*` -> `to"k`. */
+export function unquoteFtsTerm(term: string): string {
+  return term.replace(/^"/, "").replace(/"\*?$/, "").replace(/""/g, '"');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Case-insensitive pattern matching `word` at the start of a word. */
+export function wordPrefixPattern(word: string): RegExp {
+  return new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(word)})`, "iu");
+}
+
+/**
+ * Earliest case-insensitive word-prefix match of any word. Literal only:
+ * FTS folds diacritics, this does not, so an FTS hit can return null here.
+ */
+function findFirstMatch(
+  text: string,
+  words: string[]
+): { index: number; length: number } | null {
+  let best: { index: number; length: number } | null = null;
+  for (const word of words) {
+    if (!word) continue;
+    const match = wordPrefixPattern(word).exec(text);
+    if (!match) continue;
+    const index = match.index + match[1].length;
+    if (!best || index < best.index) best = { index, length: match[2].length };
+  }
+  return best;
+}
+
+/**
+ * Slices [start, end) and trims partial words at both edges (within 20
+ * chars), never cutting into `keep`.
+ */
+function sliceToWords(
+  text: string,
+  start: number,
+  end: number,
+  keep?: { index: number; length: number }
+): string {
+  let s = Math.max(0, start);
+  let e = Math.min(text.length, end);
+  if (s > 0) {
+    const space = text.indexOf(" ", s);
+    if (space !== -1 && space < s + 20 && (!keep || space < keep.index)) s = space + 1;
+  }
+  if (e < text.length) {
+    const space = text.lastIndexOf(" ", e);
+    if (space > s && space > e - 20 && (!keep || space >= keep.index + keep.length)) e = space;
+  }
+  return text.slice(s, e).trim();
+}
+
+/** A `size`-bounded excerpt centred on the first match; head cut when none. */
+export function buildMatchExcerpt(text: string, words: string[], size = 160): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= size) return compact;
+  const match = findFirstMatch(compact, words);
+  if (!match) return `${compact.slice(0, size - 3)}...`;
+  const room = size - 6; // leading and trailing "..."
+  const start = Math.max(0, match.index - Math.floor(room / 3));
+  const end = start + room;
+  const body = sliceToWords(compact, start, end, match);
+  return `${start > 0 ? "..." : ""}${body}${end < compact.length ? "..." : ""}`;
+}
+
+const RECALL_SNIPPET_MAX = 160;
+const RECALL_SNIPPET_HEAD = 60;
+const RECALL_SNIPPET_SEPARATOR = " … ";
+
+/**
+ * Auto-recall snippet: the head when the first title-term match is already
+ * visible in it (identical to compactSnippetText), otherwise ~60 chars of
+ * head + " … " + a window around the match. Falls back to the head when no
+ * term occurs literally (tag-only or diacritic-folded FTS matches) or on
+ * any error.
+ */
+export function buildRecallSnippet(content: string, terms: string[]): string {
+  try {
+    const compact = content.replace(/\s+/g, " ").trim();
+    const head = compactSnippetText(compact);
+    if (compact.length <= RECALL_SNIPPET_MAX) return head;
+    const match = findFirstMatch(compact, terms.map(unquoteFtsTerm));
+    if (!match || match.index + match.length <= RECALL_SNIPPET_MAX - 3) return head;
+    const headPart = sliceToWords(compact, 0, RECALL_SNIPPET_HEAD);
+    const room =
+      RECALL_SNIPPET_MAX - headPart.length - RECALL_SNIPPET_SEPARATOR.length - 3;
+    const start = Math.max(headPart.length, match.index - Math.floor(room / 3));
+    const end = start + room;
+    const windowText = sliceToWords(compact, start, end, match);
+    return `${headPart}${RECALL_SNIPPET_SEPARATOR}${windowText}${end < compact.length ? "..." : ""}`;
+  } catch {
+    return compactSnippetText(content);
+  }
 }

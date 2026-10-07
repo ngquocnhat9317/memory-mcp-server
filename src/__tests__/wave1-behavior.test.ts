@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runMigrations } from "../migrations/index.js";
+import { insertMemory as seedMemory } from "./fixtures/memory-seed.js";
 
 function makeWorkspaceDbPath(name: string): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-memory-mcp-"));
@@ -201,14 +202,13 @@ test("reasoning_complete_session records usage feedback for used_memory_ids and 
     assert.equal(metadata.usefulness, "used");
     assert.equal(metadata.source, "reasoning_complete_session");
 
-    const adoption = await tools.memory_adoption_report.handler({
-      limit: 20,
-    });
-    assert.equal(adoption.isError, undefined);
-    const funnel = (adoption.structuredContent as {
-      funnel: { feedback_used: number };
-    }).funnel;
-    assert.equal(funnel.feedback_used, 1);
+    const used = toolDb
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tool_usage_events
+         WHERE operation_type = 'feedback' AND json_extract(metadata, '$.usefulness') = 'used'`
+      )
+      .get() as { c: number };
+    assert.equal(used.c, 1);
   } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });
@@ -219,13 +219,11 @@ test("memory_record_usage_feedback accepts a search event that recalled the memo
   const { toolDb, toolDir, tools } = await makeHarness("wave1-feedback-search");
 
   try {
-    const saved = await tools.memory_save.handler({
+    const memoryId = seedMemory(toolDb, {
       content: "Rollback procedure documented in runbook",
       type: "fact",
-      tags: [],
       importance: 3,
     });
-    const memoryId = (saved.structuredContent as { id: string }).id;
 
     const searched = await tools.memory_search.handler({
       query: "rollback runbook",

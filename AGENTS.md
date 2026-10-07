@@ -37,7 +37,7 @@ Primary source-of-truth paths:
 ## Docs
 
 - Do not copy `README.md` setup guidance into this file.
-- `CLAUDE.md` is a mirror of this file — apply any edit here to `CLAUDE.md` as well.
+- `CLAUDE.md` only imports this file (`@AGENTS.md`) — edit the rules here, not there.
 
 ## Docs Conventions
 
@@ -57,7 +57,7 @@ When bumping the package version, update in this order, in the same change:
 5. `GUIDELINES.md` `Version:` line, only if agent-facing behavior changed.
 6. Run `npm run build && npm test`.
 7. Move the relevant row from Planned to Shipped in `docs/roadmap.md`.
-8. After the change is merged to `master`, publish by pushing a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. `.github/workflows/release.yml` verifies the tag against `package.json`, `MCP_VERSION` and `CHANGELOG.md`, runs the tests, publishes to npm (Trusted Publishing, no token) and creates the GitHub Release. Do not run `npm publish` by hand.
+8. After the change is merged to `master`, publish by pushing a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. `.github/workflows/release.yml` verifies the tag against `package.json`, `MCP_VERSION` and `CHANGELOG.md`, runs the tests, publishes to npm (Trusted Publishing, no token) and creates the GitHub Release. A failed run can be re-run: a version already on npm from the same commit is skipped (from a different commit it fails), and an existing or draft GitHub Release for the tag gets the CHANGELOG notes and is published. Do not run `npm publish` by hand.
 
 ## Version-Sync Conventions
 
@@ -89,19 +89,26 @@ for low real-world usage, use this standing threshold (owner decision,
   dates and the guide version in effect wherever the metric is reported.
 - **Minimum sample:** do not decide on fewer than 20 reasoning sessions opened
   in the window; extend the window instead of deciding on a small sample.
+- **A high `tool_rate` is necessary, not sufficient.** A tool whose output
+  or stored data is never exploited — no agent-facing read path and no
+  server-side use — is a removal candidate at any rate: being called without
+  being exploited only spends tokens. Data that no remaining tool, server
+  path or documented measurement query (e.g. the recall used-rate query in
+  `docs/architecture.md`) reads is deleted with a migration, not kept "for
+  later".
 - **Removing a tool is a breaking change to the MCP tool surface** — it
   requires its own `MCP_VERSION`/`package.json` bump and `CHANGELOG.md` entry
   per the Release Process above, regardless of which version line it lands on.
-- A specific application of this policy (window dates, current candidate
-  list, the reusable SQL) lives in
-  [`docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md`](docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md)
-  §8.1 / §8.1.1 / §8.1.2 — this section is the durable rule, that spec is one
-  measurement against it.
+- A specific application of this policy (window dates, removal list, the
+  reusable SQL) lives in
+  [`docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md`](docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md)
+  §3.1 — this section is the durable rule, that spec is one measurement
+  against it.
 
 ## Repo Map
 
-- `src/tools/memory.ts` — memory tools, telemetry reports, feedback tools
-- `src/tools/reasoning.ts` — reasoning session and audit tools
+- `src/tools/memory.ts` — memory tools and usage feedback
+- `src/tools/reasoning.ts` — reasoning session tools and `reasoning_find`
 - `src/tools/telemetry.ts` — shared usage-event recording for memory/reasoning tools
 - `src/tools/usage-guide.ts` — `get_usage_guide`
 - `src/schemas/*` — input contracts

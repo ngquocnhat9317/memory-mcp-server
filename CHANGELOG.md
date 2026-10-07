@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.4.0 (2026-10-06)
+
+Theme: a smaller tool surface — 12 tools that were unused or never exploited removed, one retrieval tool added, recalled memories recorded per session. Design: [`docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md`](docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md).
+
+### Breaking
+
+- Removed 12 tools: `memory_save`, `memory_list`, `memory_delete`,
+  `memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`,
+  `reasoning_get_trace`, `reasoning_list_sessions`, `reasoning_search_steps`,
+  `reasoning_list_milestones`, `reasoning_get_session_outline`,
+  `reasoning_mark_step`. Eleven had 0 calls over the `GUIDELINES.md` v7 window
+  (2026-08-07 → 2026-10-04, 49 sessions); `reasoning_mark_step` was called but
+  its data was never read.
+- Breaking change shipped as a minor release: pin
+  `@nhatnguyen9317/memory-mcp-server@1.3.3` to stay on the old tool surface.
+  A 1.3.x server sharing a database that 1.4.0 has migrated fails on
+  `reasoning_mark_step`, `reasoning_list_milestones`,
+  `reasoning_get_session_outline`, and on `reasoning_search_steps` with
+  `mark_type` (the `reasoning_step_marks` table is gone); the other tools keep
+  working.
+- **Data deleted on upgrade:** migration `0007` drops `reasoning_step_marks`.
+  Back up `~/.memory-mcp-server/memory.db` first if you want to keep it.
+- Migration notes: create memories with
+  `reasoning_complete_session(save_as_memory=true)`; correct them with
+  `memory_update`; flag wrong ones with
+  `memory_record_usage_feedback(usefulness='stale')`; read telemetry with SQL
+  on `tool_usage_events`; find or read past sessions with `reasoning_find`.
+  Re-run `npx @nhatnguyen9317/memory-mcp-server install-agents` to refresh the
+  installed agent snippet.
+
+### Added
+
+- `reasoning_find`: find past sessions by query (titles and conclusions by
+  word prefix, step text by full-text search) or read one session's full
+  trace.
+- Recalled memory ids are recorded per session (migration `0008`); the
+  recall used-rate query is in `docs/architecture.md`.
+- Auto-recall snippets show the part of the memory that matched the title
+  when it lies beyond the first 160 characters.
+- `reasoning_find` results include each session's `workspace`, and empty
+  sessions (no steps, and no conclusion or only the auto-abandoned
+  placeholder) rank last; the placeholder conclusion is ignored when matching.
+
+### Changed
+
+- `GUIDELINES.md` v9 (`2026-10-06.v9`): trace checkpoints and the three trace
+  questions, pending-conclusion handling, first-sentence rule, stale triggers,
+  defaults for type and importance; shorter (6,525 vs 8,787 characters).
+- Trimmed `memory_update` / `memory_search` descriptions.
+- A memory flagged stale or unsafe returns to auto-recall once it is
+  corrected with `memory_update`.
+- `tools/list`: 27,484 → 16,223 characters (9 tools, was 20);
+  `memory_update` + `memory_search`: 3,283 → 2,772.
+
 ## 1.3.3 (2026-10-05)
 
 Theme: recall that respects project identity — fixes `reasoning_start_session` recalling other projects' memories, stale memories, and near-zero-relevance memories from the same project — and brings `memory_search` onto the same blended ranking, so multi-term searches stop returning nothing. Design: [`docs/design/2026-10-05-spec-recall-workspace-identity.md`](docs/design/2026-10-05-spec-recall-workspace-identity.md), [`docs/design/2026-08-07-spec-zero-mem-inspired-recall.md`](docs/design/2026-08-07-spec-zero-mem-inspired-recall.md) §2 Option A′.
@@ -35,7 +89,7 @@ Theme: guide-contract alignment — `GUIDELINES.md`, tool descriptions, and serv
 
 ### Notes
 
-- Live-store telemetry (`MEMORY_TELEMETRY=on`) showed the manual memory CRUD surface (`memory_save`/`search`/`list`/`delete`) and the entire reasoning audit tier (`reasoning_get_trace`/`list_sessions`/`search_steps`/`list_milestones`/`get_session_outline`/`mark_step`) at zero real-world calls, while the automatic recall → save → feedback pipeline shows a 63% memory reuse rate. Recorded as an owner monitoring decision in `docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md` §8.1: keep observing with the tightened guide; remove the affected tools in a future release if usage stays near zero.
+- Live-store telemetry (`MEMORY_TELEMETRY=on`) showed the manual memory CRUD surface (`memory_save`/`search`/`list`/`delete`) and the entire reasoning audit tier (`reasoning_get_trace`/`list_sessions`/`search_steps`/`list_milestones`/`get_session_outline`/`mark_step`) at zero real-world calls, while the automatic recall → save → feedback pipeline shows a 63% memory reuse rate. Recorded as an owner monitoring decision in `docs/design/2026-07-12-spec-v1.3.5-recall-refinements.md` §8.1 (removed 2026-10-06; superseded by the 1.4.0 spec): keep observing with the tightened guide; remove the affected tools in a future release if usage stays near zero.
 
 ## 1.3.1 (2026-07-14)
 

@@ -9,6 +9,7 @@ import { migration0001Initial } from "../migrations/0001_initial.js";
 import { migration0002ReasoningStepMarks } from "../migrations/0002_reasoning_step_marks.js";
 import { migration0003ReasoningStepsFts } from "../migrations/0003_reasoning_steps_fts.js";
 import { migration0004ToolUsageEvents } from "../migrations/0004_tool_usage_events.js";
+import { saveConclusion } from "./fixtures/memory-seed.js";
 
 function makeWorkspaceDbPath(name: string): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-memory-mcp-"));
@@ -223,17 +224,7 @@ test("MEMORY_WORKSPACE pins the stamped workspace (AC-9.4)", async () => {
   const { toolDb, toolDir, tools } = await makeHarness("scoping-ws-pin");
 
   try {
-    const saved = await tools.memory_save.handler({
-      content: "stamped under a pinned workspace",
-      type: "fact",
-      importance: 3,
-    });
-    assert.equal(saved.isError, undefined);
-    const id = (saved.structuredContent as { id: string }).id;
-    const row = toolDb
-      .prepare(`SELECT workspace FROM memories WHERE id = ?`)
-      .get(id) as { workspace: string | null };
-    assert.equal(row.workspace, "/pinned-ws");
+    assert.equal(await saveConclusion(tools, toolDb), "/pinned-ws");
   } finally {
     if (originalWorkspace === undefined) {
       delete process.env.MEMORY_WORKSPACE;

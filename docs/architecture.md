@@ -1,6 +1,6 @@
 # Architecture
 
-Version: 1.3.3
+Version: 1.4.0
 
 This document describes how `memory-mcp-server` is built, for contributors
 working inside this repository. For install/usage instructions see
@@ -88,7 +88,7 @@ Supporting modules used across layers:
   `MEMORY_WORKSPACE`, `MEMORY_TELEMETRY`), and `isTelemetryEnabled()`.
 - `src/types.ts` — shared TypeScript types for rows and tool payloads.
 - `src/utils.ts` — small shared helpers (id generation, timestamps, error
-  shaping).
+  shaping, FTS term helpers, match excerpts, the recall snippet).
 
 ## 3. Module Map
 
@@ -100,16 +100,16 @@ Supporting modules used across layers:
 | `src/db.ts` | Opens the SQLite database at `DB_PATH`, sets PRAGMAs, runs migrations on import (side effect) |
 | `src/constants.ts` | `MCP_VERSION`, `DB_PATH`, and all environment-variable-driven configuration defaults |
 | `src/types.ts` | Shared TypeScript types for database rows and tool I/O |
-| `src/utils.ts` | Shared helpers: id generation, timestamps, error-response shaping |
-| `src/tools/memory.ts` | `memory_save`, `memory_search`, `memory_list`, `memory_get`, `memory_update`, `memory_delete`, `memory_record_usage_feedback`, and the telemetry report tools (`memory_usage_report`, `memory_adoption_report`, `memory_agent_scorecard`) |
-| `src/tools/reasoning.ts` | `reasoning_start_session` (auto-recall + stale-session cleanup), `reasoning_add_step`, `reasoning_complete_session`, `reasoning_get_trace`, `reasoning_list_sessions`, `reasoning_mark_step`, `reasoning_search_steps`, `reasoning_list_milestones`, `reasoning_get_session_outline` |
+| `src/utils.ts` | Shared helpers: id generation, timestamps, error-response shaping, FTS term helpers, match excerpts, query-aware recall snippet |
+| `src/tools/memory.ts` | `memory_search`, `memory_get`, `memory_update`, `memory_record_usage_feedback` |
+| `src/tools/reasoning.ts` | `reasoning_start_session` (auto-recall, recalled-id recording, stale-session cleanup), `reasoning_add_step`, `reasoning_find`, `reasoning_complete_session` |
 | `src/tools/telemetry.ts` | Shared usage-event recording (`tool_usage_events` inserts) called by both `tools/memory.ts` and `tools/reasoning.ts`; owns the `MEMORY_TELEMETRY` gate for diagnostics events |
 | `src/tools/usage-guide.ts` | `get_usage_guide` — serves the versioned `GUIDELINES.md` content and records a telemetry event for the read |
 | `src/schemas/memory.ts` | zod input contracts for every `memory_*` tool |
 | `src/schemas/reasoning.ts` | zod input contracts for every `reasoning_*` tool |
-| `src/migrations/0001_initial.ts` … `0006_workspace_identity.ts` | Individual, ordered schema migrations (see Section 5) |
+| `src/migrations/0001_initial.ts` … `0008_session_recalled_memory_ids.ts` | Individual, ordered schema migrations (see Section 5) |
 | `src/migrations/index.ts` | `runMigrations(db)` — applies pending migrations in order inside a transaction per migration, tracked in `schema_migrations` |
-| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`, and the recall eval suite `recall-eval` with its fixture in `fixtures/recall-eval-cases.ts`) |
+| `src/__tests__/*` | Behavior-locking tests, one file per feature wave plus focused suites (`memory-tools`, `migrations`, `reasoning-audit-tools`, `reasoning-find`, `tool-surface`, `recall-snippet`, `recall-measurement`, and the recall eval suite `recall-eval` with its fixture in `fixtures/recall-eval-cases.ts`; `fixtures/memory-seed.ts` holds the seed helpers) |
 
 ## 4. Data Flow
 
@@ -117,27 +117,34 @@ The typical task lifecycle, and where each step reads or writes the database:
 
 1. **`reasoning_start_session(title, ...)`** — writes a new row to
    `reasoning_sessions`. Before returning, it **reads** `memories` (full-text
-   search against `title`, scored by a blend of term coverage, BM25, workspace and recency, with a cross-project gate and no best-effort fallback — see
-   `related_memories` in the response) and **reads+writes**
-   `reasoning_sessions` again to auto-abandon any `in_progress` session older
-   than `MEMORY_SESSION_TTL_HOURS`.
+   search against `title`, scored by a blend of term coverage, BM25, workspace and recency, with a cross-project gate and no best-effort fallback; memories reported `stale` or `unsafe_to_use` are
+   skipped unless they were updated after the report, with the feedback read
+   from `tool_usage_events` — see
+   `related_memories` in the response), writes the recalled ids to
+   `reasoning_sessions.recalled_memory_ids` (best-effort, only when something
+   was recalled), and **reads+writes** `reasoning_sessions` again to
+   auto-abandon any `in_progress` session older than `MEMORY_SESSION_TTL_HOURS`
+   (it writes the placeholder conclusion "auto-abandoned: stale session").
 2. **`reasoning_add_step(session_id, ...)`** (single or batched, up to 20 per
    call) — **writes** sequentially-numbered rows to `reasoning_steps` inside
    one transaction per call.
-3. **`reasoning_mark_step(...)`** (optional, any time during the task) —
-   **writes** a row to `reasoning_step_marks` tagging a step as `decision`,
-   `conflict`, `hypothesis`, `milestone`, or `important`.
-4. **`reasoning_complete_session(session_id, conclusion, ...)`** — **writes**
+3. **`reasoning_complete_session(session_id, conclusion, ...)`** — **writes**
    the closing state to `reasoning_sessions`; if `save_as_memory=true` or
    `memory_mode='always'`, **writes** a new row to `memories` whose
    `source` provenance points back at this session; if `used_memory_ids` is
    supplied, **writes** one usage-feedback event per id (always recorded,
    independent of `MEMORY_TELEMETRY`).
+4. **`reasoning_find(query | session_id)`** (any time, when earlier work is
+   referred to that the current context lacks) — **reads** `reasoning_sessions`
+   (title/conclusion word-prefix match; the auto-abandoned placeholder
+   conclusion is ignored when matching) and `reasoning_steps` via
+   `reasoning_steps_fts`. Sessions with no steps and no conclusion (or only
+   the placeholder) rank last. With a `session_id` it returns that session's
+   full trace.
 
-`memory_save` / `memory_search` / `memory_list` / `memory_get` /
-`memory_update` / `memory_delete` operate directly on `memories` outside any
-reasoning session, for durable facts that don't need a task trace.
-`memory_search` matches any query term (OR) subject to a coverage floor (3+
+`memory_search` / `memory_get` / `memory_update` read and correct `memories`
+outside a session. Memories are created only by
+`reasoning_complete_session`. `memory_search` matches any query term (OR) subject to a coverage floor (3+
 distinct terms need at least 2 matches) and ranks by term coverage, BM25 and
 recency using the weights shared with auto-recall, computed in SQL so
 `limit`/`offset` pagination is stable.
@@ -153,9 +160,8 @@ SQLite tables, all created/altered by the migrations in `src/migrations/`:
 | Table | Added by | Purpose |
 | --- | --- | --- |
 | `memories` | `0001_initial` (workspace column added by `0005_memory_workspace`; legacy `/` and home-directory values nulled by `0006_workspace_identity`) | Durable memory rows: `type`, `content`, `importance`, `tags`, `agent_id`, `source` (session provenance), `workspace` |
-| `reasoning_sessions` | `0001_initial` (workspace column added by `0006_workspace_identity`) | One row per task-level reasoning session: `title`, `status`, `conclusion`, `workspace` (copied to persisted conclusions), timestamps |
+| `reasoning_sessions` | `0001_initial` (workspace column added by `0006_workspace_identity`, `recalled_memory_ids` by `0008_session_recalled_memory_ids`) | One row per task-level reasoning session: `title`, `status`, `conclusion`, `workspace` (copied to persisted conclusions), `recalled_memory_ids` (JSON array of the ids auto-recall returned, in order; NULL for sessions before 1.4.0, when nothing was recalled, or when the best-effort write failed), timestamps |
 | `reasoning_steps` | `0001_initial` | Ordered steps within a session: `thought`/`action`/`observation`, `step_number` |
-| `reasoning_step_marks` | `0002_reasoning_step_marks` | One mark per (step, mark type) — enforces a single row per step/type pair |
 | `tool_usage_events` | `0004_tool_usage_events` | Diagnostics/telemetry events (gated by `MEMORY_TELEMETRY`) and usage-feedback events (always recorded) |
 | `schema_migrations` | created directly by `runMigrations` (not a numbered migration) | Tracks which migration versions have been applied |
 
@@ -163,12 +169,65 @@ Plus two FTS5 virtual tables for full-text search, added by
 `0001_initial` (`memories_fts`) and `0003_reasoning_steps_fts`
 (`reasoning_steps_fts`).
 
+`0002_reasoning_step_marks` created a `reasoning_step_marks` table that
+`0007_drop_reasoning_step_marks` drops: the tool that wrote it
+(`reasoning_mark_step`) and every reader were removed in 1.4.0.
+
 Migrations run automatically: importing `src/db.ts` calls
 `runMigrations(db)`, which reads `schema_migrations`, applies any migration
 not yet recorded there (each inside its own `BEGIN`/`COMMIT`, rolled back on
 error), and records it. **Upgrading the npm package never requires manual
 schema work** — the next server start migrates the existing database file in
 place.
+
+### Recall used-rate
+
+`reasoning_sessions.recalled_memory_ids` and the `used` feedback events give a
+recall used-rate: of the memories auto-recall returned in completed sessions
+since a window start, how many the agent reported as used. The query is
+`RECALL_USED_RATE_SQL` in `src/__tests__/recall-measurement.test.ts`, which
+also tests it; bind `:window_start` to an ISO date.
+
+```sql
+WITH s AS (
+  SELECT id, recalled_memory_ids
+  FROM reasoning_sessions
+  WHERE status = 'completed'
+    AND recalled_memory_ids IS NOT NULL
+    AND created_at >= :window_start
+),
+recalled AS (
+  SELECT s.id AS session_id, j.value AS memory_id
+  FROM s, json_each(s.recalled_memory_ids) AS j
+),
+used AS (
+  SELECT DISTINCT session_id, memory_id
+  FROM tool_usage_events
+  WHERE operation_type = 'feedback' AND status = 'success'
+    AND json_extract(metadata, '$.usefulness') = 'used'
+    AND session_id IS NOT NULL AND memory_id IS NOT NULL
+)
+SELECT COUNT(*)                                     AS recalled,
+       SUM(u.memory_id IS NOT NULL)                 AS used,
+       ROUND(100.0 * SUM(u.memory_id IS NOT NULL) / COUNT(*), 1) AS used_rate_pct,
+       COUNT(DISTINCT r.session_id)                 AS sessions,
+       COUNT(DISTINCT CASE WHEN u.memory_id IS NOT NULL THEN r.session_id END)
+                                                    AS sessions_with_a_used
+FROM recalled r
+LEFT JOIN used u
+  ON u.session_id = r.session_id AND u.memory_id = r.memory_id;
+```
+
+Read the result with these caveats:
+
+- The rate is a lower bound: agents sometimes forget `used_memory_ids`, so a
+  recalled memory that helped can still count as unused. Compare windows on
+  the same tool surface only.
+- On an empty window the query returns `recalled = 0` and NULL for `used` and
+  `used_rate_pct`.
+- Only `used` feedback reported through `reasoning_complete_session`
+  (`used_memory_ids`) is counted. A direct `memory_record_usage_feedback`
+  call carries no session id, so it never matches a recalled id.
 
 ## 6. Adding a New Tool
 
@@ -199,9 +258,8 @@ gating:
 
 - **Telemetry** (diagnostics: searches, saves, recalls, latency) is
   **opt-in** via `MEMORY_TELEMETRY=on` (default `off`). It exists for
-  operators running multiple agent personas who want usage reports
-  (`memory_usage_report`, `memory_adoption_report`,
-  `memory_agent_scorecard`).
+  operators running multiple agent personas who inspect `tool_usage_events`
+  with SQL.
 - **Usage feedback** (`used_memory_ids` on `reasoning_complete_session`,
   `memory_record_usage_feedback`) is **always recorded locally**,
   regardless of `MEMORY_TELEMETRY` — it is the first-party learning signal

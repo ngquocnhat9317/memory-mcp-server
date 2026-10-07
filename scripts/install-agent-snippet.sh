@@ -44,10 +44,11 @@ whether the task looks like it needs memory.
 
 - Non-trivial task (multi-step, debugging, planning, trade-offs)?
   `reasoning_start_session` first — review the `related_memories` it
-  returns before working; if one carries a `source`, you can replay its
-  origin with `reasoning_get_trace`.
-- Log meaningful steps with `reasoning_add_step` (batch mode `steps: [...]`
-  is fine for recording finished work).
+  returns before working; if one carries a `source`, read that session
+  with `reasoning_find(session_id)`. When the user refers to earlier work
+  you don't have, `reasoning_find(query)` finds it.
+- Log steps with `reasoning_add_step` (batch mode is fine): what you
+  checked, what you found, what you decided and why.
 - Always close with `reasoning_complete_session`; report helpful memories via
   `used_memory_ids`; pass `save_as_memory=true` for durable conclusions.
 - Never store secrets, tokens, or raw sensitive data.
