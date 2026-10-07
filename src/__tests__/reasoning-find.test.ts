@@ -150,6 +150,39 @@ test("reasoning_find ranks empty sessions after sessions with content", async ()
   }
 });
 
+test("reasoning_find ranks auto-abandoned sessions with no steps last", async () => {
+  const { db, dir, tools } = await makeHarness("find-abandoned-last");
+  try {
+    insertSession(db, "sess_abandoned", {
+      title: "heron survey",
+      status: "abandoned",
+      conclusion: "auto-abandoned: stale session",
+      updatedAt: "2026-10-05T00:00:00.000Z",
+    });
+    insertSession(db, "sess_real", { title: "heron notes", updatedAt: "2026-09-01T00:00:00.000Z" });
+    insertStep(db, "sess_real", 1, "counted the nests");
+    const results = await find(tools, "heron");
+    assert.deepEqual(results.map((r) => r.session_id), ["sess_real", "sess_abandoned"]);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reasoning_find breaks ties on terms and updated_at by id", async () => {
+  const { db, dir, tools } = await makeHarness("find-id-tie");
+  try {
+    const updatedAt = "2026-10-01T00:00:00.000Z";
+    insertSession(db, "sess_b_tie", { title: "kestrel plan", conclusion: "done b", updatedAt });
+    insertSession(db, "sess_a_tie", { title: "kestrel notes", conclusion: "done a", updatedAt });
+    const results = await find(tools, "kestrel");
+    assert.deepEqual(results.map((r) => r.session_id), ["sess_a_tie", "sess_b_tie"]);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("reasoning_find returns at most 2 bounded step excerpts per session (AC-20.4)", async () => {
   const { db, dir, tools } = await makeHarness("find-excerpts");
   try {

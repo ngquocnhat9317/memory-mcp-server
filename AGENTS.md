@@ -105,8 +105,8 @@ for low real-world usage, use this standing threshold (owner decision,
 
 ## Repo Map
 
-- `src/tools/memory.ts` — memory tools, telemetry reports, feedback tools
-- `src/tools/reasoning.ts` — reasoning session and audit tools
+- `src/tools/memory.ts` — memory tools and usage feedback
+- `src/tools/reasoning.ts` — reasoning session tools and `reasoning_find`
 - `src/tools/telemetry.ts` — shared usage-event recording for memory/reasoning tools
 - `src/tools/usage-guide.ts` — `get_usage_guide`
 - `src/schemas/*` — input contracts

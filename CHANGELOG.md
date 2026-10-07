@@ -40,7 +40,8 @@ Theme: a smaller tool surface — 12 tools that were unused or never exploited r
 - Auto-recall snippets show the part of the memory that matched the title
   when it lies beyond the first 160 characters.
 - `reasoning_find` results include each session's `workspace`, and empty
-  sessions (no steps, no conclusion) rank last.
+  sessions (no steps, and no conclusion or only the auto-abandoned
+  placeholder) rank last; the placeholder conclusion is ignored when matching.
 
 ### Changed
 

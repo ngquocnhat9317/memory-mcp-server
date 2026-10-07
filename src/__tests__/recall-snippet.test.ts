@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRecallSnippet, compactSnippetText, toRecallTerms } from "../utils.js";
+import { buildMatchExcerpt, buildRecallSnippet, compactSnippetText, toRecallTerms } from "../utils.js";
 
 const filler = "Background context sentence that does not mention the subject at all. ".repeat(6);
 
@@ -46,4 +46,21 @@ test('a term containing a double quote is unescaped', () => {
   const content = `Intro. ${filler} We measured the say"hi" metric twice. ${filler}`;
   const snippet = buildRecallSnippet(content, toRecallTerms('say"hi"'));
   assert.match(snippet, /say"hi"/);
+});
+
+test("buildMatchExcerpt falls back to the head when no word matches literally", () => {
+  const text = `Chung ta can tiếp tục kiem tra. ${filler}${filler}`;
+  assert.ok(text.length > 300);
+  const excerpt = buildMatchExcerpt(text, ["tiep"]);
+  assert.equal(excerpt, `${text.replace(/\s+/g, " ").trim().slice(0, 157)}...`);
+  assert.ok(excerpt.length <= 160);
+});
+
+test("buildMatchExcerpt centres a literal match within size", () => {
+  const text = `${filler}${filler} The pelican finding was recorded here. ${filler}${filler}`;
+  assert.ok(text.length > 300);
+  const excerpt = buildMatchExcerpt(text, ["pelican"]);
+  assert.match(excerpt, /pelican/);
+  assert.ok(excerpt.length <= 160, `excerpt too long: ${excerpt.length}`);
+  assert.ok(excerpt.startsWith("..."), excerpt);
 });

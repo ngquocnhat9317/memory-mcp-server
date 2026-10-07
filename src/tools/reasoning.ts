@@ -838,11 +838,15 @@ Find first, then read only the session that matters.`,
              ORDER BY step_number ASC LIMIT ?`
           );
           const anyTerm = terms.join(" OR ");
+          const isEmpty = (row: ReasoningSessionListRow) =>
+            Number(
+              row.step_count === 0 &&
+                (!row.conclusion || row.conclusion === AUTO_ABANDONED_CONCLUSION)
+            );
           results = rows
             .sort(
               (a, b) =>
-                Number(a.step_count === 0 && !a.conclusion) -
-                  Number(b.step_count === 0 && !b.conclusion) ||
+                isEmpty(a) - isEmpty(b) ||
                 matched.get(b.id)!.size - matched.get(a.id)!.size ||
                 (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0) ||
                 (a.id < b.id ? -1 : 1)

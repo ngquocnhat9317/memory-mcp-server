@@ -62,7 +62,7 @@ function resultCount(result: ToolResponse): number {
   return result.content[0]?.text.startsWith("No memories found") ? 0 : 1;
 }
 
-/** Ids of memories returned by a search/list call, bounded so telemetry rows stay small. */
+/** Ids of memories returned by a search call, bounded so telemetry rows stay small. */
 function returnedMemoryIds(result: ToolResponse): string[] {
   const structured = extractStructuredContent(result);
   if (!Array.isArray(structured?.results)) return [];
