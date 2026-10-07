@@ -69,6 +69,10 @@ function insertStep(
 type FindResult = {
   session_id: string;
   workspace: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  step_count: number;
   matched_terms: number;
   conclusion: string | null;
   excerpts: Array<{ step_number: number; excerpt: string }>;
@@ -121,9 +125,16 @@ test("reasoning_find results carry the session workspace", async () => {
   const { db, dir, tools } = await makeHarness("find-workspace");
   try {
     insertSession(db, "sess_ws", { title: "tapir plan", workspace: "/proj/a", updatedAt: "2026-10-02T00:00:00.000Z" });
+    insertStep(db, "sess_ws", 1, "first step");
+    insertStep(db, "sess_ws", 2, "second step");
     insertSession(db, "sess_nows", { title: "tapir notes", updatedAt: "2026-10-01T00:00:00.000Z" });
     const byId = new Map((await find(tools, "tapir")).map((r) => [r.session_id, r]));
     assert.equal(byId.get("sess_ws")?.workspace, "/proj/a");
+    assert.equal(byId.get("sess_ws")?.status, "completed");
+    assert.equal(byId.get("sess_ws")?.created_at, "2026-10-02T00:00:00.000Z");
+    assert.equal(byId.get("sess_ws")?.updated_at, "2026-10-02T00:00:00.000Z");
+    assert.equal(byId.get("sess_ws")?.step_count, 2);
+    assert.equal(byId.get("sess_nows")?.step_count, 0);
     assert.equal(byId.get("sess_nows")?.workspace, null);
   } finally {
     db.close();

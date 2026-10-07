@@ -117,7 +117,9 @@ The typical task lifecycle, and where each step reads or writes the database:
 
 1. **`reasoning_start_session(title, ...)`** — writes a new row to
    `reasoning_sessions`. Before returning, it **reads** `memories` (full-text
-   search against `title`, scored by a blend of term coverage, BM25, workspace and recency, with a cross-project gate and no best-effort fallback — see
+   search against `title`, scored by a blend of term coverage, BM25, workspace and recency, with a cross-project gate and no best-effort fallback; memories reported `stale` or `unsafe_to_use` are
+   skipped unless they were updated after the report, with the feedback read
+   from `tool_usage_events` — see
    `related_memories` in the response), writes the recalled ids to
    `reasoning_sessions.recalled_memory_ids` (best-effort, only when something
    was recalled), and **reads+writes** `reasoning_sessions` again to

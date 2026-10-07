@@ -132,6 +132,33 @@ test("error text points to reasoning_find and names no removed tool", async () =
   }
 });
 
+test("start_session workspace warning and feedback verification error name no removed tool", async () => {
+  const { db, dir, tools } = makeServer();
+  try {
+    const started = await tools.reasoning_start_session.handler({ title: "surface sweep", workspace: "/" });
+    assert.equal(started.isError, undefined, started.content[0]?.text);
+    const warning = started.structuredContent?.workspace_warning;
+    assert.equal(typeof warning, "string");
+    assert.match(warning as string, /reasoning_start_session/);
+    for (const name of REMOVED_TOOL_NAMES) assert.ok(!(warning as string).includes(name), `${name} named in: ${warning}`);
+
+    const memoryId = insertMemory(db, { content: "feedback target" });
+    const res = await tools.memory_record_usage_feedback.handler({
+      memory_id: memoryId,
+      usefulness: "used",
+      event_id: "evt_missing",
+    });
+    assert.equal(res.isError, true);
+    const text = res.content[0]?.text ?? "";
+    assert.match(text, /cannot be verified/);
+    assert.match(text, /memory_get|memory_search/);
+    for (const name of REMOVED_TOOL_NAMES) assert.ok(!text.includes(name), `${name} named in: ${text}`);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 async function listTools() {
   const { db, dir, server } = makeServer();
   const client = new Client({ name: "measure", version: "0.0.0" });
