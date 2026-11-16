@@ -234,7 +234,7 @@ function recallRelatedMemories(
       }
     }
 
-    // Eligibility gate. Other projects' non-preference memories must match
+    // Eligibility gate. Other/unknown projects' non-preference memories must match
     // nearly the whole title; everyone else needs the base floor. Nothing
     // eligible means nothing returned — no best-effort lifeline.
     const total = terms.length;
@@ -246,9 +246,11 @@ function recallRelatedMemories(
         matched: matchCounts.get(candidate.row_id) ?? 1,
       }))
       .filter((candidate) => {
-        const crossProject =
-          workspace !== null && candidate.workspace_priority === 0;
-        return candidate.matched >= (crossProject ? crossProjectFloor : baseFloor);
+        const needsStrongMatch =
+          workspace !== null &&
+          candidate.workspace_priority !== 2 &&
+          candidate.type !== "preference";
+        return candidate.matched >= (needsStrongMatch ? crossProjectFloor : baseFloor);
       });
     if (eligible.length === 0) return [];
 

@@ -20,6 +20,17 @@ already state.
 
 ## Planned / Next
 
+### `1.4.1`
+
+Ready for release on **2026-11-16** after implementation and review passed
+(163/163 tests). Publication is pending; move this entry to Shipped after
+the release workflow completes. Unknown-workspace
+non-preference memories use the existing cross-project recall threshold
+when the session knows its project. Home memories, preferences and unknown
+session workspaces keep the base floor. No new tool, schema or migration;
+manual search/get and score weights are unchanged. See the
+[1.4.1 spec](design/2026-11-16-spec-v1.4.1-unknown-workspace-recall.md).
+
 **`1.3.3` is the last `1.3.x` release** — there is no `1.3.4` or `1.3.5`.
 The work once planned for `1.3.5` was resolved elsewhere: WI-11 shipped in
 `1.3.3`, and the other items were dropped (WI-12 and WI-14 earlier, WI-10,

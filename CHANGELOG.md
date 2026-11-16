@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.1 (2026-11-16)
+
+### Fixed
+
+- Auto-recall no longer gives unknown-project (`NULL` workspace) memories
+  the same eligibility threshold as home memories when the session's
+  workspace is known. Non-preference memories from unknown or other
+  projects must match at least `max(2, ceil(0.75 * N))` of the distinct
+  title terms. A one-term title cannot recall those memories; a two-term
+  title requires both terms. Strong unknown-project matches remain eligible.
+- Home memories and cross-project preferences keep the base floor. When
+  the session workspace is unknown, all memories keep the existing base
+  floor. Candidate priorities, score weights, manual search/get, tool
+  contracts and stored data are unchanged; no migration is required.
+- Added threshold-boundary and compatibility regressions, including
+  recorded recalled ids, stale/unsafe feedback and FTS failure handling.
+- Synchronized the lockfile's root package version with the release version
+  without changing dependency versions. `GUIDELINES.md` remains v9.
+
+Design: [1.4.1 unknown-workspace recall](docs/design/2026-11-16-spec-v1.4.1-unknown-workspace-recall.md).
+
 ## 1.4.0 (2026-10-06)
 
 Theme: a smaller tool surface — 12 tools that were unused or never exploited removed, one retrieval tool added, recalled memories recorded per session. Design: [`docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md`](docs/design/2026-10-06-spec-v1.4.0-tool-surface-reduction.md).

@@ -147,7 +147,14 @@ the versioned [GUIDELINES.md](./GUIDELINES.md).
   longer crowd out local ones. Since v1.3.3 an explicit `workspace` argument
   is honored, `/` and the home directory are treated as unknown, and
   memories from other projects are recalled only on a near-complete title
-  match (user preferences excepted).
+  match (user preferences excepted). Since v1.4.1, when the session knows
+  its workspace, memories with an unknown (`NULL`) workspace also need
+  that strong match: at least `max(2, ceil(0.75 * N))` of the distinct title
+  terms. A one-term title cannot recall unknown-project non-preference
+  memories; two terms require both. Home memories and preferences retain
+  the base floor (one match for fewer than three terms, otherwise two).
+  If the session's workspace is unknown, that base floor still applies to
+  everyone. Manual `memory_search` / `memory_get` remain available.
 - **Project-scoped**: point `MEMORY_DB_PATH` at a file inside the project
   (e.g. `.memory/project-memory.db`) for hard isolation per repository or
   customer.

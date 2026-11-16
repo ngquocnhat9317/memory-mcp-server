@@ -1,6 +1,6 @@
 # Architecture
 
-Version: 1.4.0
+Version: 1.4.1
 
 This document describes how `memory-mcp-server` is built, for contributors
 working inside this repository. For install/usage instructions see
@@ -148,6 +148,18 @@ outside a session. Memories are created only by
 distinct terms need at least 2 matches) and ranks by term coverage, BM25 and
 recency using the weights shared with auto-recall, computed in SQL so
 `limit`/`offset` pagination is stable.
+
+Since 1.4.1, when the session workspace is known, non-preference memories
+with an unknown (`NULL`) workspace use the same eligibility threshold as
+other-project memories: at least `max(2, ceil(0.75 * N))` matched title terms,
+where `N` is the number of distinct terms from `toRecallTerms`. A one-term
+title therefore cannot auto-recall these memories. Home memories and
+preferences keep the base floor (one match for fewer than three terms,
+otherwise two). An unknown session workspace keeps that base floor for
+every memory. Candidate-pool priorities, blended-score weights and manual
+search/get behavior are unchanged; removing ineligible candidates can still
+change BM25 normalization and the final result order. See the
+[1.4.1 spec](design/2026-11-16-spec-v1.4.1-unknown-workspace-recall.md).
 
 Every tool call that isn't pure usage-feedback also **writes** one row to
 `tool_usage_events` when `MEMORY_TELEMETRY=on` (diagnostics only — never
