@@ -54,18 +54,20 @@ function insertMemory(
     id: string;
     content: string;
     workspace?: string | null;
+    type?: string;
     importance?: number;
     updatedAt?: string;
   }
 ): void {
   db.prepare(
     `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, workspace, created_at, updated_at)
-     VALUES (?, 'fact', ?, '[]', NULL, ?, NULL, ?, ?, ?)`
+     VALUES (?, ?, ?, '[]', NULL, ?, NULL, ?, ?, ?)`
   ).run(
     fields.id,
+    fields.type ?? "fact",
     fields.content,
     fields.importance ?? 3,
-    fields.workspace ?? null,
+    fields.workspace === undefined ? process.cwd() : fields.workspace,
     "2026-07-01T00:00:00.000Z",
     fields.updatedAt ?? "2026-07-01T00:00:00.000Z"
   );
@@ -231,6 +233,157 @@ test("MEMORY_WORKSPACE pins the stamped workspace (AC-9.4)", async () => {
     } else {
       process.env.MEMORY_WORKSPACE = originalWorkspace;
     }
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+test("unknown-project recall excludes weak matches but preserves manual access and recorded ids", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-unknown-project");
+  try {
+    insertMemory(toolDb, {
+      id: "mem_weak",
+      content: "payment gateway ledger notes",
+      workspace: null,
+    });
+    insertMemory(toolDb, {
+      id: "mem_strong",
+      content: "payment gateway release notes",
+      workspace: null,
+    });
+    const started = await tools.reasoning_start_session.handler({
+      title: "payment gateway release checklist",
+      workspace: process.cwd(),
+    });
+    assert.equal(started.isError, undefined);
+    const output = started.structuredContent as {
+      session_id: string;
+      related_memories: Array<{ id: string }>;
+    };
+    assert.deepEqual(output.related_memories.map((row) => row.id), ["mem_strong"]);
+    const stored = toolDb.prepare(
+      "SELECT recalled_memory_ids FROM reasoning_sessions WHERE id = ?"
+    ).get(output.session_id) as { recalled_memory_ids: string };
+    assert.deepEqual(JSON.parse(stored.recalled_memory_ids), ["mem_strong"]);
+
+    const got = await tools.memory_get.handler({ id: "mem_weak" });
+    assert.equal(got.isError, undefined);
+    assert.equal(got.structuredContent?.id, "mem_weak");
+    const searched = await tools.memory_search.handler({
+      query: "ledger", limit: 20, offset: 0,
+    });
+    assert.equal(searched.isError, undefined);
+    const results = searched.structuredContent?.results as Array<{ id: string }>;
+    assert.deepEqual(results.map((row) => row.id), ["mem_weak"]);
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+const thresholdWords = [
+  "payment", "gateway", "release", "checklist",
+  "analytics", "warehouse", "vacuum", "policy",
+];
+
+for (const [termCount, required] of [
+  [1, 2], [2, 2], [3, 3], [4, 3], [5, 4], [6, 5], [7, 6], [8, 6],
+] as const) {
+  test(`unknown-project recall requires ${required} matches for ${termCount} title terms`, async () => {
+    const { toolDb, toolDir, tools } = await makeHarness(`scoping-unknown-${termCount}`);
+    try {
+      insertMemory(toolDb, {
+        id: "mem_below",
+        content: thresholdWords.slice(0, required - 1).join(" "),
+        workspace: null,
+      });
+      if (required <= termCount) {
+        insertMemory(toolDb, {
+          id: "mem_at",
+          content: thresholdWords.slice(0, required).join(" "),
+          workspace: null,
+        });
+      }
+      assert.deepEqual(
+        await recall(tools, thresholdWords.slice(0, termCount).join(" ")),
+        required <= termCount ? ["mem_at"] : []
+      );
+    } finally {
+      toolDb.close();
+      fs.rmSync(toolDir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [label, type, workspace] of [
+  ["home fact", "fact", process.cwd()],
+  ["home preference", "preference", process.cwd()],
+  ["unknown preference", "preference", null],
+  ["other preference", "preference", "/other/project"],
+] as const) {
+  test(`${label} keeps the base recall floor for short and long titles`, async () => {
+    const { toolDb, toolDir, tools } = await makeHarness("scoping-base-floor");
+    try {
+      insertMemory(toolDb, { id: "mem_base", content: "payment gateway", type, workspace });
+      assert.deepEqual(await recall(tools, "payment"), ["mem_base"]);
+      assert.deepEqual(await recall(tools, "payment gateway release checklist"), ["mem_base"]);
+      assert.deepEqual(await recall(tools, "payment release checklist analytics"), []);
+    } finally {
+      toolDb.close();
+      fs.rmSync(toolDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("an unknown current workspace keeps the base floor for all memory workspaces", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-unknown-session");
+  try {
+    insertMemory(toolDb, { id: "mem_null", content: "payment gateway", workspace: null });
+    insertMemory(toolDb, { id: "mem_other", content: "payment gateway", workspace: "/other/project" });
+    const started = await tools.reasoning_start_session.handler({
+      title: "payment gateway release checklist", workspace: "/",
+    });
+    assert.equal(started.isError, undefined);
+    const output = started.structuredContent as {
+      workspace: string | null;
+      workspace_warning: string;
+      related_memories: Array<{ id: string }>;
+    };
+    assert.equal(output.workspace, null);
+    assert.match(output.workspace_warning, /pass workspace/i);
+    assert.deepEqual(output.related_memories.map((row) => row.id).sort(), ["mem_null", "mem_other"]);
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+test("strong unknown-project memories still obey stale and unsafe feedback", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-unknown-stale");
+  try {
+    for (const usefulness of ["stale", "unsafe_to_use"] as const) {
+      const id = `mem_${usefulness}`;
+      insertMemory(toolDb, { id, content: "payment gateway release checklist", workspace: null });
+      const feedback = await tools.memory_record_usage_feedback.handler({ memory_id: id, usefulness });
+      assert.equal(feedback.isError, undefined);
+    }
+    assert.deepEqual(await recall(tools, "payment gateway release checklist"), []);
+  } finally {
+    toolDb.close();
+    fs.rmSync(toolDir, { recursive: true, force: true });
+  }
+});
+
+test("an FTS failure does not block session creation", async () => {
+  const { toolDb, toolDir, tools } = await makeHarness("scoping-fts-failure");
+  try {
+    toolDb.exec("DROP TABLE memories_fts");
+    const started = await tools.reasoning_start_session.handler({ title: "payment gateway" });
+    assert.equal(started.isError, undefined);
+    const output = started.structuredContent as { session_id: string; related_memories: unknown[] };
+    assert.deepEqual(output.related_memories, []);
+    assert.ok(toolDb.prepare("SELECT id FROM reasoning_sessions WHERE id = ?").get(output.session_id));
+  } finally {
     toolDb.close();
     fs.rmSync(toolDir, { recursive: true, force: true });
   }

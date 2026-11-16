@@ -57,8 +57,8 @@ function insertMemory(
   }
 ): void {
   db.prepare(
-    `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, created_at, updated_at)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`
+    `INSERT INTO memories (id, type, content, tags, agent_id, importance, metadata, workspace, created_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`
   ).run(
     fields.id,
     fields.type ?? "fact",
@@ -66,6 +66,7 @@ function insertMemory(
     fields.tags ?? "[]",
     fields.importance ?? 3,
     fields.metadata ?? null,
+    process.cwd(),
     fields.createdAt ?? "2026-07-01T00:00:00.000Z",
     fields.updatedAt ?? "2026-07-01T00:00:00.000Z"
   );
